@@ -1,8 +1,7 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 
-@Entity('uploads')
+@Entity()
 export class Upload {
-    
     @PrimaryGeneratedColumn()
     id: number;
 
@@ -10,26 +9,20 @@ export class Upload {
     userId: number;
 
     @Column()
+    type: string;
+
+    @Column()
     fileName: string;
 
     @Column()
     fileSize: number;
 
-    @Column({ nullable: true })
+    @Column()
     duration: number;
 
     @Column()
-    filePath: string;
-
-    @Column()
-    filePreviewUrl: string;
-
-    @Column({ default: true })
-    isActive: boolean;
+    filePreviewUrl: string; // 저장된 파일 URL
 
     @CreateDateColumn()
-    createdAt: Date;
-
-    @UpdateDateColumn()
-    updatedAt: Date;
+    uploadTime: Date; // 업로드 시간
 }

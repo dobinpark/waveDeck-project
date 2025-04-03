@@ -1,22 +1,56 @@
-import { Module } from '@nestjs/common';
+import { Module, ValidationPipe } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { CommonModule } from './common/common.module';
-import { Upload } from './common/upload/entities/upload.entity';
+import { UploadModule } from './common/upload/upload.module';
+import { ErrorHandlerMiddleware } from './common/middleware/error-handler.middleware';
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { HttpExceptionFilter } from './common/filter/http-exception.filter';
+import { ResponseInterceptor } from './common/interceptor/response.interceptor';
+import { BadRequestException } from '@nestjs/common';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: 'wavedeck.db',
-      entities: [Upload],
+      type: 'mysql',
+      host: 'localhost',
+      port: 3306,
+      username: 'root',
+      password: 'ddgh930810',
+      database: 'wavedeck',
+      entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: true,
       logging: true,
     }),
     CommonModule,
+    UploadModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    ErrorHandlerMiddleware,
+    {
+      provide: APP_FILTER,
+      useClass: HttpExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ResponseInterceptor,
+    },
+    {
+      provide: APP_PIPE,
+      useValue: new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        transformOptions: {
+          enableImplicitConversion: true,
+        },
+        exceptionFactory: (errors) => {
+          console.log('ValidationPipe 에러:', errors);
+          return new BadRequestException(errors);
+        },
+        forbidNonWhitelisted: true,
+        stopAtFirstError: false,
+        validationError: { target: true, value: true },
+      }),
+    },
+  ],
 })
 export class AppModule { }

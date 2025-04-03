@@ -13,9 +13,12 @@ services:
 
   db:
     image: mysql:8.0
+    container_name: mysql-db
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: voice_db
+      MYSQL_DATABASE: wavedeck
+      MYSQL_ROOT_PASSWORD: ddgh930810
+      MYSQL_USER: nestjs_user
+      MYSQL_PASSWORD: nestjs_password
     ports:
       - '3306:3306'
     volumes:
