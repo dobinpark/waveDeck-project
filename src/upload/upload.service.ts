@@ -40,6 +40,7 @@ export class UploadService {
                 fileName,
                 fileSize,
                 duration,
+                filePath: filePath,
                 filePreviewUrl: `/waveDeck-uploads/audio/${userId}/${newFilename}`,
             });
             await this.uploadRepository.save(upload);
