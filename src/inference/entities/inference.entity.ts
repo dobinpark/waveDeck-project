@@ -1,8 +1,9 @@
 import { Upload } from '../../upload/entities/upload.entity';
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, Index, JoinColumn } from 'typeorm';
 
 export enum JobStatus {
     PENDING = 'pending',
+    QUEUED = 'queued',
     PROCESSING = 'processing',
     COMPLETED = 'completed',
     FAILED = 'failed',
@@ -22,8 +23,12 @@ export class Inference {
 
     // 변환 작업 업로드 파일
     @Index()
-    @ManyToOne(() => Upload, { eager: true })
-    upload: Upload;
+    @ManyToOne(() => Upload, { 
+        eager: true,
+        onDelete: 'SET NULL',
+        nullable: true
+    })
+    upload: Upload | null;
 
     // 변환 작업 상태
     @Column({
@@ -60,4 +65,17 @@ export class Inference {
     // 변환 작업 수정 시간
     @UpdateDateColumn()
     updatedAt: Date;
+
+    @Column({ nullable: true })
+    jobQueueId: string; // BullMQ Job ID
+
+    @Column({ type: 'text', nullable: true })
+    errorMessage: string;
+
+    // Optional: 작업 시작/종료 시간
+    @Column({ type: 'timestamp', nullable: true })
+    processingStartedAt: Date | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    processingFinishedAt: Date | null;
 }

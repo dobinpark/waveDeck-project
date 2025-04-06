@@ -1,6 +1,7 @@
 import { Module, ValidationPipe, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { CommonModule } from './common/common.module';
 import { UploadModule } from './upload/upload.module';
 import { InferenceModule } from './inference/inference.module';
@@ -11,12 +12,14 @@ import { HttpExceptionFilter } from './common/filter/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptor/response.interceptor';
 import { BadRequestException } from '@nestjs/common';
 import { validationSchema } from './common/config/validationSchema';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      validationSchema,
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -35,10 +38,21 @@ import { validationSchema } from './common/config/validationSchema';
       }),
       inject: [ConfigService],
     }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST'),
+          port: configService.get<number>('REDIS_PORT'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     CommonModule,
     UploadModule,
     InferenceModule,
   ],
+  controllers: [HealthController],
   providers: [
     ErrorHandlerMiddleware,
     {
@@ -58,12 +72,17 @@ import { validationSchema } from './common/config/validationSchema';
           enableImplicitConversion: true,
         },
         exceptionFactory: (errors) => {
-          console.log('ValidationPipe 에러:', errors);
-          return new BadRequestException(errors);
+          const firstError = errors[0];
+          const firstConstraintMessage = firstError && firstError.constraints 
+            ? Object.values(firstError.constraints)[0] 
+            : 'Validation failed';
+          
+          console.error('ValidationPipe Errors:', JSON.stringify(errors, null, 2));
+          
+          return new BadRequestException(firstConstraintMessage);
         },
         forbidNonWhitelisted: true,
-        stopAtFirstError: false,
-        validationError: { target: true, value: true },
+        stopAtFirstError: true,
       }),
     },
   ],

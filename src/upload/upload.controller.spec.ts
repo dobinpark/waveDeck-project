@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UploadController } from '../src/upload/upload.controller';
-import { UploadService } from '../src/upload/upload.service';
-import { UploadFileDto } from '../src/upload/dto/upload-file.dto';
+import { UploadController } from './upload.controller';
+import { UploadService } from './upload.service';
+import { UploadFileDto } from './dto/upload-file.dto';
 import { BadRequestException } from '@nestjs/common';
 import { Multer } from 'multer';
 

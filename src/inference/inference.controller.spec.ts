@@ -62,7 +62,7 @@ describe('InferenceController', () => {
       mockInferenceService.requestTransformation.mockResolvedValue(expectedResult);
 
       // Call the controller method
-      const response = await controller.requestStsTransformation(dto);
+      const response = await controller.requestTransformation(dto);
 
       // Assertions
       expect(service.requestTransformation).toHaveBeenCalledWith(dto);
@@ -79,7 +79,7 @@ describe('InferenceController', () => {
 
         mockInferenceService.requestTransformation.mockRejectedValue(new Error(errorMessage));
 
-        await expect(controller.requestStsTransformation(dto)).rejects.toThrow(errorMessage);
+        await expect(controller.requestTransformation(dto)).rejects.toThrow(errorMessage);
     });
 
     // Add more tests for validation failures (requires different setup or e2e tests)
