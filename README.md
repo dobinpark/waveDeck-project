@@ -2,9 +2,7 @@
 
 ## 1. 프로젝트 개요
 
-본 프로젝트는 사용자가 업로드한 음성 파일을 기반으로<br>
-AI 음성 변환(STS: Speech-to-Speech)기능을<br>
-제공하는 NestJS 기반 백엔드 애플리케이션입니다.
+본 프로젝트는 사용자가 업로드한 음성 파일을 기반으로 AI 음성 변환(STS: Speech-to-Speech)기능을 제공하는 NestJS 기반 백엔드 애플리케이션입니다.
 
 ### 주요 기능
 
@@ -96,8 +94,7 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
     cd waveDeck-project
     ```
 2.  **환경 변수 파일 생성**:
-    프로젝트 루트에 `.env` 파일을 생성하고 다음 예시를 참고하여 설정합니다.<br>
-    (DB 접속 정보, Redis 정보 등)
+    프로젝트 루트에 `.env` 파일을 생성하고 다음 예시를 참고하여 설정합니다.(DB 접속 정보, Redis 정보 등)
 
     ````dotenv
     NODE_ENV=development
@@ -154,8 +151,7 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 
 ### 방법 2: 로컬 Node.js 직접 실행 (DB 및 Redis는 별도 실행 필요)
 
-로컬 개발 시 Hot Reload 등 편의성을 위해 사용합니다.<br>
-MySQL 및 Redis 서버가 로컬 또는 다른 곳에서 이미 실행 중이어야 합니다.
+로컬 개발 시 Hot Reload 등 편의성을 위해 사용합니다. MySQL 및 Redis 서버가 로컬 또는 다른 곳에서 이미 실행 중이어야 합니다.
 
 1.  **데이터베이스 마이그레이션 실행**:
     ```bash
@@ -332,8 +328,7 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
 - **DBMS**: MySQL 8.0 (Docker 컨테이너 사용)
 - **ORM**: TypeORM
 - **엔티티**: `src/upload/entities/upload.entity.ts`, `src/inference/entities/inference.entity.ts`
-- **설정**: `src/db/data-source.ts` (TypeORM CLI & Seeding용), `src/app.module.ts`<br>
-  (애플리케이션용 TypeOrmModule 설정)
+- **설정**: `src/db/data-source.ts` (TypeORM CLI & Seeding용), `src/app.module.ts`(애플리케이션용 TypeOrmModule 설정)
 - **스키마 관리**: TypeORM 마이그레이션 (`src/db/migrations`)
 
 ### 테이블 구조
@@ -385,11 +380,9 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
   ```bash
   npm run seed:run
   ```
-- **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라,<br>
-  `userId: 1`에 대한 몇 가지 샘플 오디오 파일 업로드 정보 (`uploads` 테이블)를 생성합니다.<br>
+- **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라, `userId: 1`에 대한 몇 가지 샘플 오디오 파일 업로드 정보 (`uploads` 테이블)를 생성합니다.
   (파일 경로는 예시이며 실제 파일은 생성되지 않습니다.)
-- **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고<br>
-`src/db/seeds/main.seeder.ts`에서 호출하여 다른 테이블의 데이터도 생성할 수 있습니다.
+- **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고 `src/db/seeds/main.seeder.ts`에서 호출하여 다른 테이블의 데이터도 생성할 수 있습니다.
 
 ### 샘플 쿼리
 
