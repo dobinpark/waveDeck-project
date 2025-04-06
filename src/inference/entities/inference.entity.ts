@@ -1,5 +1,5 @@
 import { Upload } from '../../upload/entities/upload.entity';
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, Index } from 'typeorm';
 
 export enum JobStatus {
     PENDING = 'pending',
@@ -8,18 +8,20 @@ export enum JobStatus {
     FAILED = 'failed',
 }
 
-@Entity('conversion')
-export class Conversion {
+@Entity('inference')
+export class Inference {
 
     // 변환 작업 고유 ID
     @PrimaryGeneratedColumn()
     id: number;
 
     // 변환 작업 소유자 ID
+    @Index()
     @Column()
     userId: number;
 
     // 변환 작업 업로드 파일
+    @Index()
     @ManyToOne(() => Upload, { eager: true })
     upload: Upload;
 

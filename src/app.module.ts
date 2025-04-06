@@ -1,9 +1,11 @@
-import { Module, ValidationPipe } from '@nestjs/common';
+import { Module, ValidationPipe, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from './common/common.module';
 import { UploadModule } from './upload/upload.module';
+import { InferenceModule } from './inference/inference.module';
 import { ErrorHandlerMiddleware } from './common/middleware/error-handler.middleware';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { HttpExceptionFilter } from './common/filter/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptor/response.interceptor';
@@ -15,7 +17,6 @@ import { validationSchema } from './common/config/validationSchema';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      validationSchema,
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -26,14 +27,17 @@ import { validationSchema } from './common/config/validationSchema';
         username: configService.get<string>('DB_USERNAME'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_DATABASE'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true,
+        entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+        migrations: [__dirname + '/../migrations/*{.ts,.js}'],
+        synchronize: false,
         logging: true,
+        migrationsRun: false,
       }),
       inject: [ConfigService],
     }),
     CommonModule,
     UploadModule,
+    InferenceModule,
   ],
   providers: [
     ErrorHandlerMiddleware,
@@ -64,4 +68,10 @@ import { validationSchema } from './common/config/validationSchema';
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(RequestIdMiddleware)
+      .forRoutes('*');
+  }
+}

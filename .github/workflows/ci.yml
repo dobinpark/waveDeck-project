@@ -1,0 +1,66 @@
+name: Node.js CI
+
+on:
+  push:
+    branches: [ "main" ] # 사용하는 주 브랜치 이름으로 변경
+  pull_request:
+    branches: [ "main" ] # 사용하는 주 브랜치 이름으로 변경
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Add services for E2E testing
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ddgh930810 # Should match docker-compose for consistency, but use secrets in real projects
+          MYSQL_DATABASE: wavedeck_test # Use a separate test database
+          MYSQL_USER: nestjs_user
+          MYSQL_PASSWORD: nestjs_password
+        ports:
+          - 3306:3306 # Port mapping needed for the job container to access the service
+        options: >- # Health check to wait until MySQL is ready
+          --health-cmd="mysqladmin ping --silent" 
+          --health-interval=10s 
+          --health-timeout=5s 
+          --health-retries=3
+
+    strategy:
+      matrix:
+        node-version: [18.x] # Dockerfile과 일치하는 Node.js 버전 사용
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run linter
+      run: npm run lint
+
+    - name: Build project
+      run: npm run build --if-present
+
+    - name: Run unit/integration tests with coverage
+      run: npm run test:cov
+
+    - name: Run E2E tests
+      run: npm run test:e2e
+      env: # Set environment variables for E2E tests to connect to the service DB
+        DB_HOST: 127.0.0.1 # Use localhost for service container access
+        DB_PORT: 3306
+        DB_USERNAME: nestjs_user
+        DB_PASSWORD: nestjs_password
+        DB_DATABASE: wavedeck_test # Connect to the test database
+      # E2E 테스트 (npm run test:e2e)는 데이터베이스 등 외부 서비스가 필요할 수 있어
+      # 추가 설정(예: services 키워드 사용)이 필요할 수 있습니다.
+      # 우선 단위/통합 테스트 위주로 실행합니다. 

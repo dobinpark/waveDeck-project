@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 @Entity('upload')
 export class Upload {
@@ -8,6 +8,7 @@ export class Upload {
     id: number;
 
     // 업로드 파일 소유자 ID
+    @Index()
     @Column()
     userId: number;
 

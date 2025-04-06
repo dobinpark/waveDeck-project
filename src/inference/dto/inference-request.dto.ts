@@ -1,6 +1,6 @@
 import { IsNotEmpty, IsNumber, IsOptional, Min } from 'class-validator';
 
-export class ConversionRequestDto {
+export class InferenceRequestDto {
     @IsNotEmpty()
     @IsNumber()
     userId: number;
