@@ -2,7 +2,8 @@
 
 ## 1. 프로젝트 개요
 
-본 프로젝트는 사용자가 업로드한 음성 파일을 기반으로 AI 음성 변환(STS: Speech-to-Speech)기능을<br>
+본 프로젝트는 사용자가 업로드한 음성 파일을 기반으로<br>
+AI 음성 변환(STS: Speech-to-Speech)기능을<br>
 제공하는 NestJS 기반 백엔드 애플리케이션입니다.
 
 ### 주요 기능
@@ -50,14 +51,14 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 
 ### 주요 모듈 설명 및 상호작용
 
-- **`AppModule` (Root)**: 애플리케이션의 루트 모듈로, 다른 모든 모듈과 TypeORM, ConfigModule 등을 임포트하고 설정합니다.
+- **`AppModule`(Root)**: 애플리케이션의 루트 모듈로, 다른 모든 모듈과 TypeORM, ConfigModule 등을 임포트하고 설정합니다.
 - **`UploadModule`**: `/api/v1/upload` 경로의 API 요청을 처리합니다.
   - `UploadController`: 클라이언트로부터 파일 업로드(`POST /audio`) 및 삭제(`DELETE /audio/:id`) 요청을 받습니다.
   - `UploadService`: 파일 유효성 검사, 로컬 파일 시스템 저장 (`waveDeck-uploads`), `uploads` 테이블에 메타데이터 저장/삭제 로직을 수행합니다.
 - **`InferenceModule`**: `/api/v1/inference` 경로의 API 요청을 처리합니다.
   - `InferenceController`: AI 변환 요청(`POST /`) 및 작업 상태 조회(`GET /status/:jobId`) 요청을 받습니다.
   - `InferenceService`: 변환 요청 시 `inferences` 테이블에 작업 레코드를 생성하고, BullMQ (`inference-queue`)에 작업을 추가합니다. 작업 상태 조회 로직을 담당합니다.
-- **`BullMQModule` (Imported in `InferenceModule`)**: Redis 기반의 큐 시스템을 설정합니다.
+- **`BullMQModule`(Imported in `InferenceModule`)**: Redis 기반의 큐 시스템을 설정합니다.
   - `InferenceProcessor`: `inference-queue`에 등록된 작업을 비동기적으로 처리하는 워커입니다. AI 처리(현재 Mock)를 수행하고, 그 결과를 `inferences` 테이블의 상태 및 결과 필드에 업데이트합니다.
 - **`CommonModule`**: 여러 모듈에서 공통으로 사용되는 기능을 제공합니다.
   - `RequestIdMiddleware`: 모든 요청에 고유 ID를 부여하여 로깅 추적을 용이하게 합니다.
@@ -153,8 +154,8 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 
 ### 방법 2: 로컬 Node.js 직접 실행 (DB 및 Redis는 별도 실행 필요)
 
-로컬 개발 시 Hot Reload 등 편의성을 위해 사용합니다. MySQL 및 Redis 서버가 로컬 또는<br>
-다른 곳에서 이미 실행 중이어야 합니다.
+로컬 개발 시 Hot Reload 등 편의성을 위해 사용합니다.<br>
+MySQL 및 Redis 서버가 로컬 또는 다른 곳에서 이미 실행 중이어야 합니다.
 
 1.  **데이터베이스 마이그레이션 실행**:
     ```bash
@@ -384,11 +385,11 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
   ```bash
   npm run seed:run
   ```
-- **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라, `userId: 1`에 대한<br>
-  몇 가지 샘플 오디오 파일 업로드 정보 (`uploads` 테이블)를 생성합니다.<br>
+- **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라,<br>
+  `userId: 1`에 대한 몇 가지 샘플 오디오 파일 업로드 정보 (`uploads` 테이블)를 생성합니다.<br>
   (파일 경로는 예시이며 실제 파일은 생성되지 않습니다.)
-- **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고 `src/db/seeds/main.seeder.ts`에서<br>
-  호출하여 다른 테이블의 데이터도 생성할 수 있습니다.
+- **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고<br>
+`src/db/seeds/main.seeder.ts`에서 호출하여 다른 테이블의 데이터도 생성할 수 있습니다.
 
 ### 샘플 쿼리
 
