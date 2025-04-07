@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, InternalServerErrorException, Logger } f
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Queue, Job } from 'bullmq';
+import { Queue, Job, JobState } from 'bullmq';
 import { Inference, JobStatus } from './entities/inference.entity';
 import { Upload } from '../upload/entities/upload.entity';
 import { InferenceRequestDto } from './dto/inference-request.dto';
@@ -107,7 +107,7 @@ export class InferenceService {
 
     /**
      * 특정 사용자의 Inference 작업 상태를 조회하여 상세 정보 DTO로 반환합니다.
-     * DB 정보와 BullMQ 큐의 실제 상태를 조합합니다.
+     * DB 정보와 BullMQ 큐의 실제 상태 및 대기열 정보를 조합합니다.
      * @param jobId 조회할 작업의 DB ID (Inference.id)
      * @param userId 작업을 요청한 사용자 ID
      * @returns JobStatusResponseDto 형식의 작업 상태 정보
@@ -119,7 +119,7 @@ export class InferenceService {
         // 1. DB에서 Inference 정보 조회
         const inference = await this.inferenceRepository.findOne({
             where: { id: jobId, userId: userId },
-            relations: ['upload'], // Upload 정보도 함께 로드 (previewUrl 생성에 필요)
+            relations: ['upload'],
         });
 
         if (!inference) {
@@ -127,12 +127,27 @@ export class InferenceService {
         }
 
         let queueJob: Job | null = null;
+        let queueState: JobState | null = null;
+        let waitingCount: number | null = null;
+
         if (inference.jobQueueId) {
             try {
                 queueJob = await this.inferenceQueue.getJob(inference.jobQueueId);
+                if (queueJob) {
+                    const stateResult = await queueJob.getState(); // 임시 변수에 결과 저장
+                    // 'unknown' 상태는 null로 처리, 그 외에는 JobState로 간주
+                    queueState = stateResult !== 'unknown' ? stateResult : null; 
+                    
+                    if (queueState) { // queueState가 null이 아닐 때만 로그 및 추가 작업 수행
+                        this.logger.debug(`큐 내 작업 상태: Job ID ${queueJob.id}, 상태: ${queueState}`);
+                        // 작업이 대기 중일 때만 대기열 카운트 조회
+                        if (queueState === 'waiting' || queueState === 'delayed') {
+                            waitingCount = await this.inferenceQueue.getWaitingCount();
+                        }
+                    }
+                }
             } catch (error) {
                 this.logger.warn(`큐에서 작업 ${inference.jobQueueId} 조회 실패: ${error.message}`);
-                // 큐에서 작업을 찾을 수 없어도 DB 상태를 기반으로 응답할 수 있음
             }
         }
 
@@ -140,38 +155,51 @@ export class InferenceService {
         const response = new JobStatusResponseDto();
         response.jobQueueId = inference.jobQueueId;
         response.inferenceDbId = inference.id;
-        response.status = inference.status; // 기본적으로 DB 상태 사용
+        response.status = inference.status; // 기본 DB 상태
+        response.queueState = queueState;   // getState()로 가져온 실제 큐 상태
+        response.waitingCount = waitingCount; // 대기 중인 작업 수
         response.createdAt = inference.createdAt.toISOString();
         response.updatedAt = inference.updatedAt.toISOString();
         response.errorMessage = inference.errorMessage;
         response.processingStartedAt = inference.processingStartedAt?.toISOString() || null;
         response.processingFinishedAt = inference.processingFinishedAt?.toISOString() || null;
-        response.queuePosition = null; // 기본값 null
 
-        if (queueJob) {
-            const queueStatus = await queueJob.getState();
-            this.logger.debug(`큐 내 작업 상태: Job ID ${queueJob.id}, 상태: ${queueStatus}`);
+        if (queueState) {
+            // DB 상태와 큐 상태 동기화 로직 (더 명확하게)
+            let dbStatusNeedsUpdate = false;
+            let updatedStatus = inference.status;
+            let updatedErrorMessage: string | null = inference.errorMessage;
 
-            // DB 상태와 큐 상태 동기화 (예: DB는 QUEUED인데 큐는 active)
-            if (queueStatus === 'active' && inference.status !== JobStatus.PROCESSING) {
-                response.status = JobStatus.PROCESSING;
-            } else if (queueStatus === 'completed' && inference.status !== JobStatus.COMPLETED) {
-                response.status = JobStatus.COMPLETED;
-            } else if (queueStatus === 'failed' && inference.status !== JobStatus.FAILED) {
-                response.status = JobStatus.FAILED;
-                response.errorMessage = queueJob.failedReason || inference.errorMessage || '알 수 없는 오류'; // Unknown error -> 알 수 없는 오류
-            } else if (queueStatus === 'waiting' || queueStatus === 'delayed') {
-                response.status = JobStatus.QUEUED;
-                // 대기열 위치 추정 (정확하지 않을 수 있음)
-                // BullMQ v5+ 에서는 getWaitingCount() 만으로 특정 job의 위치 파악 어려움
+            if (queueState === 'active' && inference.status !== JobStatus.PROCESSING) {
+                updatedStatus = JobStatus.PROCESSING;
+                dbStatusNeedsUpdate = true;
+            } else if (queueState === 'completed' && inference.status !== JobStatus.COMPLETED) {
+                updatedStatus = JobStatus.COMPLETED;
+                updatedErrorMessage = null; // 성공 시 에러 메시지 초기화
+                dbStatusNeedsUpdate = true;
+            } else if (queueState === 'failed' && inference.status !== JobStatus.FAILED) {
+                updatedStatus = JobStatus.FAILED;
+                updatedErrorMessage = queueJob?.failedReason ?? inference.errorMessage ?? '알 수 없는 오류';
+                dbStatusNeedsUpdate = true;
+            } else if ((queueState === 'waiting' || queueState === 'delayed') && 
+                       (inference.status === JobStatus.PENDING || inference.status === JobStatus.FAILED || inference.status === JobStatus.PROCESSING)) {
+                // PENDING, FAILED, PROCESSING 상태에서 다시 큐에 들어갈 경우 QUEUED로 업데이트
+                updatedStatus = JobStatus.QUEUED;
+                updatedErrorMessage = null; // 대기 상태이므로 에러 메시지 초기화
+                dbStatusNeedsUpdate = true;
             }
 
-            // 큐 상태가 최종 상태일 경우 DB 업데이트 (선택적)
-            if (response.status !== inference.status) {
-                 this.logger.log(`DB 상태 업데이트: Job ID ${inference.id} (${inference.status} -> ${response.status})`);
-                 inference.status = response.status;
-                 if(response.status === JobStatus.FAILED) inference.errorMessage = response.errorMessage;
-                 await this.inferenceRepository.save(inference).catch(err => {
+            // 응답 상태는 큐 상태 기준으로 업데이트된 상태 반영
+            response.status = updatedStatus;
+            response.errorMessage = updatedErrorMessage;
+
+            // DB 상태 업데이트 필요 시 저장
+            if (dbStatusNeedsUpdate) {
+                 this.logger.log(`DB 상태 업데이트: Job ID ${inference.id} (${inference.status} -> ${updatedStatus})`);
+                 inference.status = updatedStatus;
+                 inference.errorMessage = updatedErrorMessage;
+                 // 비동기로 처리하여 응답 지연 방지 (오류는 로그로 남김)
+                 this.inferenceRepository.save(inference).catch(err => {
                      this.logger.error(`DB 상태 업데이트 실패: Job ID ${inference.id}, 오류: ${err.message}`);
                  });
              }

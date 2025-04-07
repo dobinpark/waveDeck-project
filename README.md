@@ -359,8 +359,12 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
     ```bash
     docker-compose exec app npm run seed:run
     ```
--   **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라, `userId: 1`에 대한 몇 가지 샘플 오디오 파일 업로드 정보 (`uploads` 테이블)를 생성합니다. (실제 파일은 생성되지 않습니다.)
--   **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고 `src/db/seeds/main.seeder.ts`에서 호출하여 다른 테이블의 데이터도 생성할 수 있습니다.
+-   **내용**: `src/db/seeds/upload.seeder.ts` 파일에 정의된 로직에 따라, `userId: 1`에 대한 3개의 샘플 오디오 파일 업로드 정보 (`upload` 테이블)를 생성합니다. 생성되는 데이터 예시는 다음과 같습니다 (ID 및 시간은 실제와 다를 수 있음):
+    -   `{ userId: 1, fileName: 'sample_audio_1.wav', filePath: 'waveDeck-uploads/audio/1/1.wav', ... }`
+    -   `{ userId: 1, fileName: 'short_speech.mp3', filePath: 'waveDeck-uploads/audio/1/2.mp3', ... }`
+    -   `{ userId: 1, fileName: 'long_podcast_segment.mp3', filePath: 'waveDeck-uploads/audio/1/3.mp3', ... }`
+    (주의: 이 시더는 데이터베이스 레코드만 생성하며, 실제 오디오 파일을 생성하지는 않습니다.)
+-   **확장**: `src/db/seeds/` 디렉토리에 새로운 Seeder 파일을 추가하고 `src/db/seeds/main.seeder.ts` 파일 내 `run` 메서드에서 해당 시더를 호출하도록 수정하여 다른 테이블의 데이터도 생성할 수 있습니다.
 
 ### 샘플 쿼리
 

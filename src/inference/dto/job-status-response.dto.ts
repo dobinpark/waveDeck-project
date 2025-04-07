@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { JobStatus } from '../entities/inference.entity';
+import { JobState } from 'bullmq';
 
 class InferenceResultDto {
 
@@ -22,20 +23,23 @@ class InferenceResultDto {
 
 export class JobStatusResponseDto {
 
-    @ApiProperty({ description: 'BullMQ Job ID' })
-    jobQueueId: string;
+    @ApiProperty({ description: 'BullMQ Job ID', nullable: true })
+    jobQueueId: string | null;
 
     @ApiProperty({ description: 'DB Inference ID' })
     inferenceDbId: number;
 
-    @ApiProperty({ enum: JobStatus, description: '작업 상태' })
+    @ApiProperty({ enum: JobStatus, description: '작업 상태 (DB 기준)' })
     status: JobStatus;
 
     @ApiProperty({ type: InferenceResultDto, description: '작업 결과 (완료 시)', nullable: true })
     result?: InferenceResultDto | null;
 
-    @ApiProperty({ description: '대기열 내 위치 (알 수 없는 경우 null)', nullable: true })
-    queuePosition?: number | null;
+    @ApiProperty({ description: 'BullMQ 큐 상태 (큐에 있는 경우)', nullable: true, type: String })
+    queueState?: JobState | null;
+
+    @ApiProperty({ description: '현재 대기 중인 작업 수 (해당 작업이 대기 중일 때)', nullable: true })
+    waitingCount?: number | null;
 
     @ApiProperty({ description: '작업 생성 시간 (ISO 8601)' })
     createdAt: string; // ISO 8601 형식
@@ -51,4 +55,4 @@ export class JobStatusResponseDto {
 
     @ApiProperty({ description: '작업 처리 완료 시간 (ISO 8601)', nullable: true })
     processingFinishedAt?: string | null;
-} 
+}

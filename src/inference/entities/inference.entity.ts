@@ -70,7 +70,7 @@ export class Inference {
     jobQueueId: string; // BullMQ Job ID
 
     @Column({ type: 'text', nullable: true })
-    errorMessage: string;
+    errorMessage: string | null;
 
     // Optional: 작업 시작/종료 시간
     @Column({ type: 'timestamp', nullable: true })
