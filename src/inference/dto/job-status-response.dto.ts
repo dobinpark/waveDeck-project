@@ -2,20 +2,26 @@ import { ApiProperty } from '@nestjs/swagger';
 import { JobStatus } from '../entities/inference.entity';
 
 class InferenceResultDto {
+
+    // DB에 저장된 Inference 작업 ID
     @ApiProperty({ description: 'DB에 저장된 Inference 작업 ID' })
     inferenceId: number;
 
+    // 변환된 파일 미리보기 URL
     @ApiProperty({ description: '변환된 파일 미리보기 URL', nullable: true })
     previewUrl?: string;
 
+    // 변환된 파일 경로
     @ApiProperty({ description: '변환된 파일 경로', nullable: true })
     convertedPath?: string;
 
+    // 변환된 파일 크기 (bytes)
     @ApiProperty({ description: '변환된 파일 크기 (bytes)', nullable: true })
     convertedFileSize?: number;
 }
 
 export class JobStatusResponseDto {
+
     @ApiProperty({ description: 'BullMQ Job ID' })
     jobQueueId: string;
 

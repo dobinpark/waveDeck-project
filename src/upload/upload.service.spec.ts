@@ -1,15 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as fs from 'fs/promises'; // Import fs promises
-import * as path from 'path'; // Import path
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { UploadService } from './upload.service';
 import { Upload } from './entities/upload.entity';
 import { UploadFileDto } from './dto/upload-file.dto';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, InternalServerErrorException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { FileSystemException, DatabaseException } from './exceptions/upload-exceptions';
 import { Multer } from 'multer';
-import { Logger } from '@nestjs/common'; // Import Logger
+import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Express } from 'express';
 
 // Mock fs/promises module
 jest.mock('fs/promises', () => ({
@@ -19,20 +21,20 @@ jest.mock('fs/promises', () => ({
 }));
 
 // Define a specific mock type for the repository methods we use
-type SpecificMockRepository<T extends Record<string, any>> = Pick<Repository<T>, 'findOne' | 'create' | 'save' | 'remove' | 'count'> & {
+type SpecificMockRepository<T extends Record<string, any>> = Pick<Repository<T>, 'findOne' | 'create' | 'save' | 'delete' | 'remove'> & {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    delete: jest.Mock;
     remove: jest.Mock;
-    count: jest.Mock;
 };
 
 const createMockRepository = <T extends Record<string, any> = any>(): SpecificMockRepository<T> => ({
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    delete: jest.fn(),
     remove: jest.fn(),
-    count: jest.fn(),
 });
 
 describe('UploadService', () => {
@@ -40,6 +42,7 @@ describe('UploadService', () => {
     let uploadRepository: SpecificMockRepository<Upload>;
     let fsMock: jest.Mocked<typeof fs>; // Type for mocked fs
     let loggerSpy: jest.SpyInstance; // Spy for logger methods
+    let configService: ConfigService;
 
     beforeEach(async () => {
         const module: TestingModule = await Test.createTestingModule({
@@ -48,6 +51,15 @@ describe('UploadService', () => {
                 {
                     provide: getRepositoryToken(Upload),
                     useValue: createMockRepository<Upload>(),
+                },
+                {
+                    provide: ConfigService,
+                    useValue: { // ConfigService Mock (주석 번역)
+                        get: jest.fn((key: string) => {
+                            if (key === 'BASE_URL') return 'http://test.com';
+                            return null;
+                        }),
+                    },
                 },
                 // Provide Logger if needed, or rely on default instance
                 // Logger, // Add Logger if you want to inject/spy on it explicitly
@@ -68,140 +80,161 @@ describe('UploadService', () => {
 
         // Reset mocks before each test
         jest.clearAllMocks();
+
+        // ensureBaseDirectoryExists Mock (생성자에서 호출됨) (주석 번역)
+        jest.spyOn(service as any, 'ensureBaseDirectoryExists').mockResolvedValue(undefined);
     });
 
     afterEach(() => {
         loggerSpy.mockRestore(); // Restore logger spy after each test
     });
 
-    it('should be defined', () => {
+    it('정의되어야 함', () => { // 'should be defined' 번역
         expect(service).toBeDefined();
     });
 
     describe('uploadAudio', () => {
         const mockFile: Multer.File = {
-            fieldname: 'file', originalname: 'test.wav', encoding: '7bit', mimetype: 'audio/wave', size: 1024,
-            stream: null as any, destination: '', filename: '', path: '', buffer: Buffer.from('test data')
-        };
+            fieldname: 'file',
+            originalname: 'test_audio.wav',
+            encoding: '7bit',
+            mimetype: 'audio/wav',
+            size: 1024 * 500, // 500KB
+            buffer: Buffer.from('test buffer content'), // 테스트용 버퍼 내용 (주석 번역)
+            // stream, destination, filename, path 등은 필요시 추가 (주석 번역)
+        } as Multer.File;
+
         const mockDto: UploadFileDto = {
-            userId: 1, fileName: 'test.wav', fileSize: 1024, type: 'upload', duration: 5000
+            userId: 1,
+            fileName: 'test_audio.wav',
+            fileSize: 1024 * 500,
+            duration: 30000,
+            type: 'audio',
         };
-        const mockUploadEntity = { id: 1 } as Upload;
-        const expectedPath = path.join(process.cwd(), 'waveDeck-uploads', 'audio', String(mockDto.userId));
-        const expectedFilename = `1.wav`; // Assumes getNextFileId returns 1
-        const expectedFilepath = path.join(expectedPath, expectedFilename);
+
+        const mockUploadEntity = { id: 1, ...mockDto, filePath: null, filePreviewUrl: null, uploadTime: null } as unknown as Upload;
+        const mockSavedEntity = { ...mockUploadEntity, id: 1, uploadTime: new Date() } as Upload;
+        const expectedUserAudioPath = path.join('waveDeck-uploads', 'audio', String(mockDto.userId));
+        const expectedFilePath = path.join(expectedUserAudioPath, `${mockSavedEntity.id}.wav`);
+        const expectedRelativePath = path.join('audio', String(mockDto.userId), `${mockSavedEntity.id}.wav`).replace(/\\/g, '/');
 
         beforeEach(() => {
-             // Mock getNextFileId (private method access) to return a predictable ID
-            jest.spyOn(service as any, 'getNextFileId').mockResolvedValue(1);
-            uploadRepository.create.mockReturnValue(mockUploadEntity); // Mock create
-            uploadRepository.save.mockResolvedValue({ ...mockUploadEntity, id: 1, filePreviewUrl: `/waveDeck-uploads/audio/1/${expectedFilename}`, uploadTime: new Date() }); // Mock save
+            // ensureUserAudioDirectory Mock 설정 (주석 번역)
+            jest.spyOn(service as any, 'ensureUserAudioDirectory').mockResolvedValue(expectedUserAudioPath);
         });
 
-        it('should upload file, save entity, and return details', async () => {
-            fsMock.mkdir.mockResolvedValue(undefined); // Mock mkdir success
-            fsMock.writeFile.mockResolvedValue(undefined); // Mock writeFile success
+        it('오디오 파일을 성공적으로 업로드하고 DB에 저장해야 함', async () => { // 'should upload audio file and save to DB successfully' 번역
+            uploadRepository.create.mockReturnValue(mockUploadEntity); // 임시 엔티티 생성 Mock (주석 번역)
+            uploadRepository.save
+                .mockResolvedValueOnce(mockSavedEntity) // 첫 번째 저장 (ID 확보) Mock (주석 번역)
+                .mockResolvedValueOnce({ // 두 번째 저장 (경로 업데이트) Mock (주석 번역)
+                    ...mockSavedEntity,
+                    filePath: expectedRelativePath,
+                    filePreviewUrl: `http://test.com/${expectedRelativePath}`,
+                });
+            (fs.writeFile as jest.Mock).mockResolvedValue(undefined); // 파일 쓰기 성공 Mock (주석 번역)
 
             const result = await service.uploadAudio(mockFile, mockDto);
 
-            expect(fsMock.mkdir).toHaveBeenCalledWith(expectedPath, { recursive: true });
-            expect(fsMock.writeFile).toHaveBeenCalledWith(expectedFilepath, mockFile.buffer);
-            expect(uploadRepository.create).toHaveBeenCalledWith(expect.objectContaining({
-                userId: mockDto.userId,
-                type: mockDto.type,
-                fileName: mockDto.fileName,
-                filePath: expectedFilepath,
-                filePreviewUrl: `/waveDeck-uploads/audio/1/${expectedFilename}`,
-            }));
-            expect(uploadRepository.save).toHaveBeenCalledWith(mockUploadEntity);
-            expect(result.data.fileId).toBe(1);
-            expect(result.data.filePreviewUrl).toBe(`/waveDeck-uploads/audio/1/${expectedFilename}`);
+            expect(service['ensureUserAudioDirectory']).toHaveBeenCalledWith(mockDto.userId);
+            expect(uploadRepository.create).toHaveBeenCalledWith(expect.objectContaining({ userId: mockDto.userId, fileName: mockFile.originalname }));
+            expect(uploadRepository.save).toHaveBeenCalledTimes(2);
+            expect(fs.writeFile).toHaveBeenCalledWith(expectedFilePath, mockFile.buffer);
+            expect(result).toMatchObject({
+                id: mockSavedEntity.id,
+                filePath: expectedRelativePath,
+                filePreviewUrl: `http://test.com/${expectedRelativePath}`,
+            });
         });
 
-        it('should throw FileSystemException if mkdir fails', async () => {
-            const mkdirError = new Error('EEXIST: file already exists');
-            fsMock.mkdir.mockRejectedValue(mkdirError);
+        it('DB 임시 저장 실패 시 InternalServerErrorException을 던져야 함', async () => { // 'should throw InternalServerErrorException if initial DB save fails' 번역
+            uploadRepository.create.mockReturnValue(mockUploadEntity);
+            uploadRepository.save.mockRejectedValueOnce(new Error('DB 오류')); // 첫 번째 저장 실패 Mock (주석 번역)
 
-            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(FileSystemException);
+            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(InternalServerErrorException);
+            expect(fs.writeFile).not.toHaveBeenCalled(); // 파일 쓰기 시도 안 함 (주석 번역)
         });
 
-        it('should throw FileSystemException if writeFile fails', async () => {
-            const writeFileError = new Error('EACCES: permission denied');
-            fsMock.mkdir.mockResolvedValue(undefined);
-            fsMock.writeFile.mockRejectedValue(writeFileError);
+        it('파일 시스템 쓰기 실패 시 관련 예외를 던지고 임시 DB 레코드를 삭제해야 함', async () => { // 'should throw relevant exception and delete temp DB record if file write fails' 번역
+            const fileWriteError = new Error('파일 쓰기 오류');
+            (fileWriteError as any).code = 'EACCES'; // 접근 거부 오류 시뮬레이션 (주석 번역)
+            uploadRepository.create.mockReturnValue(mockUploadEntity);
+            uploadRepository.save.mockResolvedValueOnce(mockSavedEntity); // 첫 번째 저장 성공 (주석 번역)
+            (fs.writeFile as jest.Mock).mockRejectedValue(fileWriteError); // 파일 쓰기 실패 Mock (주석 번역)
+            uploadRepository.delete.mockResolvedValue({}); // 임시 레코드 삭제 성공 Mock (주석 번역)
 
-            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(FileSystemException);
+            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(ForbiddenException); // EACCES -> ForbiddenException (주석 번역)
+            expect(uploadRepository.delete).toHaveBeenCalledWith(mockSavedEntity.id); // 임시 레코드 삭제 확인 (주석 번역)
         });
 
-        it('should throw DatabaseException if saving entity fails', async () => {
-            const dbError = new Error('SQLITE_ERROR: unable to open database file');
-            fsMock.mkdir.mockResolvedValue(undefined);
-            fsMock.writeFile.mockResolvedValue(undefined);
-            uploadRepository.save.mockRejectedValue(dbError);
+        it('최종 DB 업데이트 실패 시 InternalServerErrorException을 던지고 저장된 파일을 삭제해야 함', async () => { // 'should throw InternalServerErrorException and delete saved file if final DB update fails' 번역
+            uploadRepository.create.mockReturnValue(mockUploadEntity);
+            uploadRepository.save.mockResolvedValueOnce(mockSavedEntity); // 첫 번째 저장 성공 (주석 번역)
+            (fs.writeFile as jest.Mock).mockResolvedValue(undefined); // 파일 쓰기 성공 (주석 번역)
+            uploadRepository.save.mockRejectedValueOnce(new Error('DB 업데이트 오류')); // 두 번째 저장(업데이트) 실패 Mock (주석 번역)
+            (fs.unlink as jest.Mock).mockResolvedValue(undefined); // 파일 삭제 성공 Mock (주석 번역)
 
-            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(DatabaseException);
+            await expect(service.uploadAudio(mockFile, mockDto)).rejects.toThrow(InternalServerErrorException);
+            expect(fs.unlink).toHaveBeenCalledWith(expectedFilePath); // 파일 삭제 확인 (주석 번역)
         });
+
     });
 
     describe('deleteFile', () => {
         const fileId = 1;
         const userId = 1;
-        const mockUploadToDelete: Upload = {
-            id: fileId, userId: userId, filePath: 'path/to/delete.wav', filePreviewUrl: '/uploads/1/delete.wav'
+        const mockUpload: Upload = {
+            id: fileId,
+            userId: userId,
+            filePath: 'audio/1/1.wav',
+            // ... 기타 필요한 필드들 ...
         } as Upload;
+        const expectedFilePath = path.join('waveDeck-uploads', mockUpload.filePath);
 
-        it('should delete file from FS and DB record successfully', async () => {
-            uploadRepository.findOne.mockResolvedValue(mockUploadToDelete);
-            fsMock.unlink.mockResolvedValue(undefined); // Mock unlink success
-            uploadRepository.remove.mockResolvedValue(mockUploadToDelete);
+        it('파일과 DB 레코드를 성공적으로 삭제해야 함', async () => { // 'should delete file and DB record successfully' 번역
+            uploadRepository.findOne.mockResolvedValue(mockUpload);
+            (fs.unlink as jest.Mock).mockResolvedValue(undefined); // 파일 시스템 삭제 성공 Mock (주석 번역)
+            uploadRepository.delete.mockResolvedValue({ affected: 1 }); // DB 삭제 성공 Mock (주석 번역)
 
-            const result = await service.deleteFile(fileId, userId);
+            await service.deleteFile(fileId, userId);
 
             expect(uploadRepository.findOne).toHaveBeenCalledWith({ where: { id: fileId, userId: userId } });
-            expect(fsMock.unlink).toHaveBeenCalledWith(mockUploadToDelete.filePath);
-            expect(uploadRepository.remove).toHaveBeenCalledWith(mockUploadToDelete);
-            expect(result.message).toBe('파일이 성공적으로 삭제되었습니다.');
-            expect(loggerSpy).not.toHaveBeenCalled(); // No errors logged
+            expect(fs.unlink).toHaveBeenCalledWith(expectedFilePath);
+            expect(uploadRepository.delete).toHaveBeenCalledWith(fileId);
         });
 
-        it('should throw NotFoundException if file entity not found', async () => {
+        it('파일을 찾을 수 없으면 NotFoundException을 던져야 함', async () => { // 'should throw NotFoundException if file not found' 번역
             uploadRepository.findOne.mockResolvedValue(null);
 
             await expect(service.deleteFile(fileId, userId)).rejects.toThrow(NotFoundException);
-            expect(fsMock.unlink).not.toHaveBeenCalled();
-            expect(uploadRepository.remove).not.toHaveBeenCalled();
+            expect(fs.unlink).not.toHaveBeenCalled();
+            expect(uploadRepository.delete).not.toHaveBeenCalled();
         });
 
-        // Updated test for fs.unlink failure
-        it('should log error, remove DB record, and return success message with warning if fs.unlink fails', async () => {
-            const unlinkError = new FileSystemException('unlink failed'); // Use the specific exception
-            uploadRepository.findOne.mockResolvedValue(mockUploadToDelete);
-            // Mock the private deleteFileFromFs to throw the specific error
-            const deleteFsSpy = jest.spyOn(service as any, 'deleteFileFromFs').mockRejectedValue(unlinkError);
-            uploadRepository.remove.mockResolvedValue(mockUploadToDelete); // DB remove should still succeed
+        it('파일 시스템 삭제 실패 시에도 DB 레코드 삭제를 시도해야 함', async () => { // 'should attempt to delete DB record even if file system deletion fails' 번역
+            const fsError = new Error('FS 오류');
+            uploadRepository.findOne.mockResolvedValue(mockUpload);
+            (fs.unlink as jest.Mock).mockRejectedValue(fsError); // 파일 시스템 삭제 실패 Mock (주석 번역)
+            uploadRepository.delete.mockResolvedValue({ affected: 1 }); // DB 삭제는 성공 (주석 번역)
 
+            // 서비스는 성공으로 간주하거나, 경고와 함께 성공 메시지를 반환할 수 있음 (현재 구현 기준) (주석 번역)
             const result = await service.deleteFile(fileId, userId);
 
-            expect(uploadRepository.findOne).toHaveBeenCalledWith({ where: { id: fileId, userId: userId } });
-            expect(deleteFsSpy).toHaveBeenCalledWith(mockUploadToDelete.filePath);
-            expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to delete file from filesystem'), expect.any(String)); // Check error log
-            expect(uploadRepository.remove).toHaveBeenCalledWith(mockUploadToDelete); // DB remove is called
-            // Check the specific warning message is included
-            expect(result.message).toBe('파일이 성공적으로 삭제되었습니다. (파일 시스템에서 파일 삭제 중 오류 발생)');
-
-            deleteFsSpy.mockRestore();
+            expect(fs.unlink).toHaveBeenCalledWith(expectedFilePath);
+            expect(uploadRepository.delete).toHaveBeenCalledWith(fileId);
+            expect(result.message).toContain('파일 시스템에서 파일 삭제 중 오류 발생'); // 경고 메시지 확인 (주석 번역)
         });
 
-        // Updated test for DB remove failure
-        it('should throw DatabaseException if DB remove fails (after successful or failed unlink)', async () => {
-            const dbError = new Error('DB remove error');
-            uploadRepository.findOne.mockResolvedValue(mockUploadToDelete);
-            fsMock.unlink.mockResolvedValue(undefined); // Assume unlink succeeds for this case
-            uploadRepository.remove.mockRejectedValue(dbError);
+        it('DB 레코드 삭제 실패 시 InternalServerErrorException을 던져야 함', async () => { // 'should throw InternalServerErrorException if DB record deletion fails' 번역
+            const dbError = new Error('DB 삭제 오류');
+            uploadRepository.findOne.mockResolvedValue(mockUpload);
+            (fs.unlink as jest.Mock).mockResolvedValue(undefined); // 파일 시스템 삭제는 성공 (주석 번역)
+            uploadRepository.delete.mockRejectedValue(dbError); // DB 삭제 실패 Mock (주석 번역)
 
-            await expect(service.deleteFile(fileId, userId)).rejects.toThrow(DatabaseException);
-            expect(fsMock.unlink).toHaveBeenCalledWith(mockUploadToDelete.filePath);
-            expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to remove upload record from DB'), expect.any(String)); // Check error log
+            await expect(service.deleteFile(fileId, userId)).rejects.toThrow(InternalServerErrorException);
         });
+
     });
+
+    // deleteFileFromFs 테스트는 필요시 추가 가능 (private 메서드) (주석 번역)
 }); 

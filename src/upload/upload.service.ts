@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, ConflictException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Upload } from './entities/upload.entity';
@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { Multer } from 'multer';
 import { FileSystemException, DatabaseException, UnknownUploadException } from './exceptions/upload-exceptions';
+import { ConfigService } from '@nestjs/config';
 
 /**
  * 파일 업로드 및 삭제 관련 비즈니스 로직을 처리하는 서비스입니다.
@@ -16,18 +17,61 @@ import { FileSystemException, DatabaseException, UnknownUploadException } from '
 @Injectable()
 export class UploadService {
     private readonly logger = new Logger(UploadService.name);
+    private readonly uploadBasePath = 'waveDeck-uploads';
+    private readonly audioFolderPath = 'audio';
+    private readonly baseUrl: string;
 
     /**
      * UploadService 인스턴스를 생성합니다.
      * @param uploadRepository Upload 엔티티 Repository 주입
+     * @param configService ConfigService 주입
      */
     constructor(
         @InjectRepository(Upload)
         private uploadRepository: Repository<Upload>,
-    ) { }
+        private configService: ConfigService,
+    ) {
+        this.baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
+        this.ensureBaseDirectoryExists(); // 기본 업로드 디렉토리 존재 확인 및 생성
+    }
 
-    // fileIdCounter is likely not robust for concurrent requests, using DB sequence is better.
-    // private fileIdCounter = 1; 
+    /**
+     * 기본 업로드 디렉토리가 존재하는지 확인하고 없으면 생성합니다.
+     */
+    private async ensureBaseDirectoryExists(): Promise<void> {
+        try {
+            await fs.access(this.uploadBasePath);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                this.logger.log(`기본 업로드 디렉토리(${this.uploadBasePath})가 없어 생성합니다.`);
+                await fs.mkdir(this.uploadBasePath, { recursive: true });
+            } else {
+                this.logger.error(`기본 업로드 디렉토리 접근 오류: ${error.message}`, error.stack);
+                throw error; // 예상치 못한 오류는 다시 던짐
+            }
+        }
+    }
+
+    /**
+     * 사용자별 오디오 파일 업로드 디렉토리를 생성하거나 확인합니다.
+     * @param userId 사용자 ID
+     * @returns 사용자별 오디오 파일 저장 경로
+     */
+    private async ensureUserAudioDirectory(userId: number): Promise<string> {
+        const userAudioPath = path.join(this.uploadBasePath, this.audioFolderPath, String(userId));
+        try {
+            await fs.access(userAudioPath);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                this.logger.log(`사용자 오디오 디렉토리(${userAudioPath})가 없어 생성합니다.`);
+                await fs.mkdir(userAudioPath, { recursive: true });
+            } else {
+                this.logger.error(`사용자 오디오 디렉토리 접근 오류: ${error.message}`, error.stack);
+                throw error; // 예상치 못한 오류는 다시 던짐
+            }
+        }
+        return userAudioPath;
+    }
 
     /**
      * 오디오 파일을 업로드하고 관련 정보를 데이터베이스에 저장합니다.
@@ -65,7 +109,7 @@ export class UploadService {
              // 1. DB에 먼저 저장하여 ID 확보
             const savedUpload = await this.uploadRepository.save(upload);
             const fileId = savedUpload.id;
-            this.logger.log(`Saved initial upload record with ID: ${fileId}`);
+            this.logger.log(`초기 업로드 레코드 저장됨. ID: ${fileId}`);
 
             // 2. 확보된 ID로 최종 파일 경로 및 URL 설정
             const newFilename = `${fileId}${fileExtension}`;
@@ -75,13 +119,13 @@ export class UploadService {
             // 3. 파일 시스템 작업 (디렉토리 생성 및 파일 쓰기)
             await fs.mkdir(uploadPath, { recursive: true });
             await fs.writeFile(finalFilePath, file.buffer);
-            this.logger.log(`File saved to filesystem: ${finalFilePath}`);
+            this.logger.log(`파일 시스템에 저장됨: ${finalFilePath}`);
 
             // 4. 파일 경로 및 URL로 DB 레코드 업데이트
             savedUpload.filePath = finalFilePath;
             savedUpload.filePreviewUrl = finalFilePreviewUrl;
-            await this.uploadRepository.save(savedUpload); // Update the record
-            this.logger.log(`Updated upload record ${fileId} with final paths.`);
+            await this.uploadRepository.save(savedUpload); // 레코드 업데이트
+            this.logger.log(`업로드 레코드 ${fileId} 최종 경로로 업데이트됨.`);
 
             // 5. 결과 반환
             return {
@@ -93,17 +137,17 @@ export class UploadService {
             };
         } catch (error) {
             this.logger.error('파일 업로드 처리 중 오류 발생:', error.stack);
-            // Check for 'code' property before accessing it
+            // 오류 코드 존재 여부 확인
             if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
                 throw new FileSystemException(`디렉토리 생성 실패: ${error.message}`);
             } else if (error instanceof Error && 'code' in error && error.code === 'EACCES') {
                 throw new FileSystemException(`파일 쓰기/디렉토리 생성 실패 (권한 오류): ${error.message}`);
-            } else if (error instanceof Error && (error.message.includes('SQL') || error.message.includes('database'))) { // DB error check remains the same
+            } else if (error instanceof Error && (error.message.includes('SQL') || error.message.includes('database'))) {
                 throw new DatabaseException(`데이터베이스 오류: ${error.message}`);
             } else if (error instanceof FileSystemException || error instanceof DatabaseException) {
                 throw error;
             } else {
-                throw new UnknownUploadException(`알 수 없는 업로드 오류: ${error.message || 'Unknown error'}`);
+                throw new UnknownUploadException(`알 수 없는 업로드 오류: ${error.message || '알 수 없는 오류'}`);
             }
         }
     }
@@ -126,44 +170,44 @@ export class UploadService {
         });
 
         if (!upload) {
-            this.logger.warn(`Attempted to delete non-existent upload: fileId=${fileId}, userId=${userId}`);
+            this.logger.warn(`삭제 시도: 존재하지 않는 업로드 파일: fileId=${fileId}, userId=${userId}`);
             throw new NotFoundException(`파일을 찾을 수 없습니다 (ID: ${fileId})`);
         }
 
         let fileDeleted = false;
         let dbRecordRemoved = false;
 
-        // 1. Attempt to delete the file from filesystem
+        // 1. 파일 시스템에서 파일 삭제 시도
         try {
-            // Use the actual stored file path for deletion
-            await this.deleteFileFromFs(upload.filePath); 
+            // 실제 저장된 파일 경로를 사용하여 삭제
+            await this.deleteFileFromFs(upload.filePath);
             fileDeleted = true;
-            this.logger.log(`Successfully deleted file from filesystem: ${upload.filePath}`);
+            this.logger.log(`파일 시스템에서 파일 삭제 성공: ${upload.filePath}`);
         } catch (fsError) {
-            // Log the error but continue to attempt DB record deletion
-            this.logger.error(`Failed to delete file from filesystem: ${upload.filePath}`, fsError.stack);
-            // Optionally, throw FileSystemException if file deletion MUST succeed
+            // 오류 로깅 후 DB 레코드 삭제 계속 시도
+            this.logger.error(`파일 시스템에서 파일 삭제 실패: ${upload.filePath}`, fsError.stack);
+            // 중요: 파일 삭제가 반드시 성공해야 한다면 여기서 FileSystemException 발생시킬 수 있음
             // throw new FileSystemException(`파일 시스템에서 파일을 삭제하지 못했습니다: ${fsError.message}`);
         }
 
-        // 2. Attempt to remove the record from the database
+        // 2. 데이터베이스에서 레코드 삭제 시도
         try {
             await this.uploadRepository.remove(upload);
             dbRecordRemoved = true;
-            this.logger.log(`Successfully removed upload record from DB: id=${fileId}`);
+            this.logger.log(`데이터베이스에서 업로드 레코드 삭제 성공: id=${fileId}`);
         } catch (dbError) {
-            this.logger.error(`Failed to remove upload record from DB: id=${fileId}`, dbError.stack);
-            // If file was deleted but DB record removal failed, this is problematic.
-            // Throw DatabaseException.
+            this.logger.error(`데이터베이스에서 업로드 레코드 삭제 실패: id=${fileId}`, dbError.stack);
+            // 파일은 삭제되었으나 DB 레코드 삭제 실패 시 문제 발생 가능성 있음.
+            // DatabaseException 발생.
             throw new DatabaseException(`데이터베이스에서 파일 기록을 삭제하지 못했습니다: ${dbError.message}`);
         }
 
-        // Consider the overall success based on critical actions (e.g., DB removal)
+        // 주요 작업(예: DB 삭제) 성공 여부에 따라 최종 결과 결정
         if (dbRecordRemoved) {
              return { message: '파일이 성공적으로 삭제되었습니다.' + (!fileDeleted ? ' (파일 시스템에서 파일 삭제 중 오류 발생)' : '') };
         } else {
-             // This case should technically not be reached due to the exception in the DB catch block
-             this.logger.error(`DB record removal failed silently for upload id=${fileId}. This should not happen.`);
+             // 이론상 DB catch 블록에서 예외가 발생하므로 이 경우는 도달하지 않음
+             this.logger.error(`DB 레코드 삭제가 조용히 실패함 (upload id=${fileId}). 이 상황은 발생하면 안 됩니다.`);
              throw new UnknownUploadException('알 수 없는 오류로 파일 삭제에 실패했습니다.');
         }
     }
@@ -177,9 +221,9 @@ export class UploadService {
         try {
             await fs.unlink(filePath);
         } catch (error) {
-            // Log detailed error here, but re-throw for the caller to handle
-            this.logger.error(`fs.unlink failed for path: ${filePath}`, error.stack);
-            // Throw a specific FileSystemException with only the message
+            // 상세 오류 로깅 후, 호출자가 처리하도록 다시 던짐
+            this.logger.error(`fs.unlink 실패: 경로=${filePath}`, error.stack);
+            // 특정 FileSystemException 발생 (메시지만 포함)
             throw new FileSystemException(`파일 시스템 삭제 오류 (${filePath}): ${error.message}`);
         }
     }
@@ -197,7 +241,7 @@ export class UploadService {
         return lastUpload ? lastUpload.id + 1 : 1;
     }
 
-    // The following methods seem like older/alternative implementations and might be unused
+    // 아래 메서드들은 이전/대체 구현으로 보이며 사용되지 않을 수 있음
     /*
     async uploadFile(uploadFileDto: UploadFileDto, file: Multer.File): Promise<Upload> {
         // ... implementation ...

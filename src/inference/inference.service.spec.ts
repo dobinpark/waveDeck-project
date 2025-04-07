@@ -6,9 +6,10 @@ import { Inference, JobStatus } from './entities/inference.entity';
 import { Upload } from '../upload/entities/upload.entity';
 import { InferenceRequestDto } from './dto/inference-request.dto';
 import { NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { getQueueToken } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
-// Mock TypeORM Repository
-// Define a more specific mock type for the methods we use
 type SpecificMockRepository<T extends Record<string, any>> = Pick<Repository<T>, 'findOne' | 'create' | 'save'> & {
     findOne: jest.Mock;
     create: jest.Mock;
@@ -21,10 +22,18 @@ const createMockRepository = <T extends Record<string, any> = any>(): SpecificMo
     save: jest.fn(),
 });
 
+// BullMQ 큐 Mock
+const mockInferenceQueue = {
+    add: jest.fn(),
+    getJob: jest.fn(),
+    // 필요 시 다른 큐 메서드 Mock 추가
+};
+
 describe('InferenceService', () => {
     let service: InferenceService;
     let inferenceRepository: SpecificMockRepository<Inference>;
     let uploadRepository: SpecificMockRepository<Upload>;
+    let inferenceQueue: Queue;
 
     beforeEach(async () => {
         const module: TestingModule = await Test.createTestingModule({
@@ -38,6 +47,19 @@ describe('InferenceService', () => {
                     provide: getRepositoryToken(Upload),
                     useValue: createMockRepository<Upload>(),
                 },
+                {
+                    provide: getQueueToken('inference-queue'),
+                    useValue: mockInferenceQueue,
+                },
+                {
+                    provide: ConfigService,
+                    useValue: {
+                        get: jest.fn((key: string) => {
+                            if (key === 'BASE_URL') return 'http://test-base-url';
+                            return null;
+                        }),
+                    },
+                },
             ],
         }).compile();
 
@@ -48,9 +70,13 @@ describe('InferenceService', () => {
         uploadRepository = module.get<SpecificMockRepository<Upload>>(
             getRepositoryToken(Upload),
         );
+        inferenceQueue = module.get<Queue>(getQueueToken('inference-queue'));
+
+        // 각 테스트 전에 Mock 초기화
+        jest.clearAllMocks();
     });
 
-    it('should be defined', () => {
+    it('정의되어야 함', () => {
         expect(service).toBeDefined();
     });
 
@@ -59,22 +85,22 @@ describe('InferenceService', () => {
         const mockUpload: Upload = {
             id: 1,
             userId: 1,
-            type: 'audio',
             fileName: 'test.wav',
             fileSize: 1024,
             duration: 10,
-            filePreviewUrl: '/uploads/1/test.wav',
             filePath: 'path/to/test.wav',
             uploadTime: new Date(),
-        };
-        const mockJob = { id: 1, status: JobStatus.PENDING };
+        } as Upload;
 
-        it('should create and return a new inference job', async () => {
+        const mockSavedDbJob = { id: 123, status: JobStatus.PENDING, jobQueueId: null, userId: 1, upload: mockUpload };
+        const mockQueueJob = { id: 'inference-123' };
+
+        it('새로운 추론 작업을 생성하고 반환해야 함', async () => {
             uploadRepository.findOne.mockResolvedValue(mockUpload);
-            inferenceRepository.create.mockReturnValue(mockJob);
-            inferenceRepository.save.mockResolvedValue({ ...mockJob, id: 123 });
-
-            jest.spyOn(service as any, 'simulateAiProcessingWithRetry').mockImplementation(() => { });
+            inferenceRepository.create.mockReturnValue(mockSavedDbJob as any);
+            inferenceRepository.save.mockResolvedValueOnce(mockSavedDbJob);
+            inferenceRepository.save.mockResolvedValueOnce({ ...mockSavedDbJob, status: JobStatus.QUEUED, jobQueueId: mockQueueJob.id });
+            mockInferenceQueue.add.mockResolvedValue(mockQueueJob);
 
             const result = await service.requestTransformation(dto);
 
@@ -87,182 +113,145 @@ describe('InferenceService', () => {
                 pitch: dto.pitch,
                 originalPath: mockUpload.filePath,
             }));
-            expect(inferenceRepository.save).toHaveBeenCalledWith(mockJob);
-            expect((service as any).simulateAiProcessingWithRetry).toHaveBeenCalledWith(123);
+            expect(inferenceRepository.save).toHaveBeenCalledTimes(2);
+            expect(mockInferenceQueue.add).toHaveBeenCalledWith(
+                'process-inference',
+                { inferenceId: mockSavedDbJob.id },
+                expect.objectContaining({ jobId: `inference-${mockSavedDbJob.id}` })
+            );
             expect(result).toEqual({
-                jobId: 123,
-                previewUrl: 'https://example.com/preview/123',
+                jobId: mockSavedDbJob.id,
+                jobQueueId: mockQueueJob.id,
+                statusCheckUrl: `/api/v1/inference/status/${mockSavedDbJob.id}`,
             });
         });
 
-        it('should throw NotFoundException if upload not found', async () => {
+        it('업로드를 찾을 수 없으면 NotFoundException을 던져야 함', async () => {
             uploadRepository.findOne.mockResolvedValue(null);
             await expect(service.requestTransformation(dto)).rejects.toThrow(NotFoundException);
         });
 
-        it('should throw InternalServerErrorException on save failure', async () => {
+        it('첫 번째 저장 실패 시 InternalServerErrorException을 던져야 함', async () => {
             uploadRepository.findOne.mockResolvedValue(mockUpload);
-            inferenceRepository.create.mockReturnValue(mockJob);
-            inferenceRepository.save.mockRejectedValue(new Error('DB error'));
+            inferenceRepository.create.mockReturnValue(mockSavedDbJob as any);
+            inferenceRepository.save.mockRejectedValueOnce(new Error('DB 오류'));
+            await expect(service.requestTransformation(dto)).rejects.toThrow(InternalServerErrorException);
+            expect(mockInferenceQueue.add).not.toHaveBeenCalled();
+        });
+
+        it('큐 추가 실패 시 InternalServerErrorException을 던져야 함', async () => {
+            uploadRepository.findOne.mockResolvedValue(mockUpload);
+            inferenceRepository.create.mockReturnValue(mockSavedDbJob as any);
+            inferenceRepository.save.mockResolvedValueOnce(mockSavedDbJob);
+            mockInferenceQueue.add.mockRejectedValue(new Error('큐 오류'));
             await expect(service.requestTransformation(dto)).rejects.toThrow(InternalServerErrorException);
         });
     });
 
-    // Tests for the private simulateAiProcessingWithRetry method
-    describe('simulateAiProcessingWithRetry', () => {
+    describe('getJobStatus', () => {
         const jobId = 1;
-        let mockPendingJob: Inference;
+        const userId = 1;
+        const mockJobQueueId = `inference-${jobId}`;
+        let mockInference: Inference;
 
         beforeEach(() => {
-            // Reset mocks and timers for each test
-            jest.clearAllMocks();
-            jest.useRealTimers(); // Use real timers by default, enable fake timers in specific tests
-
-            // Basic pending job mock for reuse
-            mockPendingJob = {
+            // 각 테스트 전 Mock 데이터 초기화
+            // @ts-ignore 제거 또는 필요 시 다른 필드에 남김
+            mockInference = {
                 id: jobId,
-                userId: 1,
-                upload: { id: 1 } as Upload, // Simplified mock upload
-                status: JobStatus.PENDING,
-                voiceId: 72,
-                pitch: 0,
-                originalPath: 'path/to/original',
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                convertedPath: undefined,
-                convertedFileSize: undefined,
-                jobQueueId: `inference-${jobId}`, // Assign a mock queue ID
-                // @ts-ignore - Ignoring potential type mismatch for nullable errorMessage
+                userId: userId,
+                jobQueueId: mockJobQueueId,
+                status: JobStatus.QUEUED,
+                createdAt: new Date('2024-01-01T10:00:00Z'),
+                updatedAt: new Date('2024-01-01T10:05:00Z'),
+                upload: { id: 1 } as Upload,
+                originalPath: 'path/original.wav',
+                convertedPath: null,
                 errorMessage: null,
                 processingStartedAt: null,
                 processingFinishedAt: null,
-            };
+                voiceId: 72,
+                pitch: 0,
+                convertedFileSize: null,
+            } as Inference;
         });
 
-        it('should complete successfully on the first attempt', async () => {
-            jest.useFakeTimers();
-            const ir = inferenceRepository!;
-            ir.findOne.mockResolvedValue(mockPendingJob);
-            ir.save.mockResolvedValueOnce({ ...mockPendingJob, status: JobStatus.PROCESSING }) // First save (PROCESSING)
-                .mockResolvedValueOnce({ ...mockPendingJob, status: JobStatus.COMPLETED }); // Second save (COMPLETED)
+        it('완료된 작업 상태와 결과 URL을 반환해야 함', async () => {
+            mockInference.status = JobStatus.COMPLETED;
+            mockInference.convertedPath = 'audio/1/converted_1.wav';
+            mockInference.convertedFileSize = 12345;
+            inferenceRepository.findOne.mockResolvedValue(mockInference);
+            mockInferenceQueue.getJob.mockResolvedValue({
+                id: mockJobQueueId,
+                getState: jest.fn().mockResolvedValue('completed'),
+            });
 
-            // Mock Math.random to simulate success (e.g., return value < 0.7)
-            jest.spyOn(Math, 'random').mockReturnValue(0.5);
+            const result = await service.getJobStatus(jobId, userId);
 
-            // Access private method for testing
-            await (service as any).simulateAiProcessingWithRetry(jobId);
-
-            // Advance timers past the simulated delay
-            await jest.advanceTimersByTimeAsync(6000); // Advance by max possible delay (5000 + 1000)
-
-            expect(ir.findOne).toHaveBeenCalledTimes(1);
-            expect(ir.save).toHaveBeenCalledTimes(2); // PROCESSING and COMPLETED status updates
-            expect(ir.save).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: JobStatus.PROCESSING }));
-            expect(ir.save).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: JobStatus.COMPLETED }));
-
-            jest.spyOn(Math, 'random').mockRestore(); // Restore Math.random
-            jest.useRealTimers();
+            expect(inferenceRepository.findOne).toHaveBeenCalledWith({ where: { id: jobId, userId: userId }, relations: ['upload'] });
+            expect(mockInferenceQueue.getJob).toHaveBeenCalledWith(mockJobQueueId);
+            expect(result).toMatchObject({
+                inferenceDbId: jobId,
+                jobQueueId: mockJobQueueId,
+                status: JobStatus.COMPLETED,
+                result: {
+                    inferenceId: jobId,
+                    previewUrl: `http://test-base-url/audio/1/converted_1.wav`,
+                    convertedPath: mockInference.convertedPath,
+                    convertedFileSize: mockInference.convertedFileSize,
+                },
+                errorMessage: null,
+            });
+            expect(inferenceRepository.save).not.toHaveBeenCalled();
         });
 
-        it('should complete successfully after one retry', async () => {
-            jest.useFakeTimers();
-            const ir = inferenceRepository!;
-            ir.findOne.mockResolvedValue(mockPendingJob);
-            ir.save.mockResolvedValue({} as Inference); // Generic mock for save
+        it('처리 중인 작업 상태를 반환해야 함 (큐 active 기준)', async () => {
+            mockInference.status = JobStatus.QUEUED;
+            inferenceRepository.findOne.mockResolvedValue(mockInference);
+            mockInferenceQueue.getJob.mockResolvedValue({
+                id: mockJobQueueId,
+                getState: jest.fn().mockResolvedValue('active'),
+            });
 
-            // Mock Math.random: fail first (>= 0.7), succeed second (< 0.8)
-            jest.spyOn(Math, 'random').mockReturnValueOnce(0.9).mockReturnValueOnce(0.5);
+            const result = await service.getJobStatus(jobId, userId);
 
-            await (service as any).simulateAiProcessingWithRetry(jobId);
-
-            // Attempt 1: Advance past processing delay + retry delay
-            await jest.advanceTimersByTimeAsync(6000 + 1000);
-            expect(ir.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.PROCESSING })); // First PROCESSING save
-
-            // Attempt 2: Advance past processing delay
-            await jest.advanceTimersByTimeAsync(6000);
-            expect(ir.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.PROCESSING })); // Second PROCESSING save
-            expect(ir.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.COMPLETED })); // Final COMPLETED save
-            expect(ir.save).toHaveBeenCalledTimes(3); // PROCESSING, PROCESSING, COMPLETED
-
-            jest.spyOn(Math, 'random').mockRestore();
-            jest.useRealTimers();
+            expect(result.status).toBe(JobStatus.PROCESSING);
+            expect(result.result).toBeUndefined();
+            expect(inferenceRepository.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.PROCESSING }));
         });
 
-        it('should fail after max retries', async () => {
-            jest.useFakeTimers();
-            const ir = inferenceRepository!;
-            ir.findOne.mockResolvedValue(mockPendingJob);
-            ir.save.mockResolvedValue({} as Inference);
+        it('실패한 작업 상태와 오류 메시지를 반환해야 함 (큐 failed 기준)', async () => {
+            mockInference.status = JobStatus.PROCESSING;
+            inferenceRepository.findOne.mockResolvedValue(mockInference);
+            mockInferenceQueue.getJob.mockResolvedValue({
+                id: mockJobQueueId,
+                getState: jest.fn().mockResolvedValue('failed'),
+                failedReason: 'Queue processing error',
+            });
 
-            // Mock Math.random to always fail
-            jest.spyOn(Math, 'random').mockReturnValue(0.9);
+            const result = await service.getJobStatus(jobId, userId);
 
-            await (service as any).simulateAiProcessingWithRetry(jobId);
-
-            // Advance timers for all retries + delays
-            const maxRetries = (service as any).MAX_RETRIES; // Access private constant
-            const retryDelay = (service as any).RETRY_DELAY_MS;
-            const maxProcessingDelay = 6000;
-            for (let i = 0; i < maxRetries; i++) {
-                await jest.advanceTimersByTimeAsync(maxProcessingDelay + retryDelay);
-            }
-
-            expect(ir.save).toHaveBeenCalledTimes(maxRetries + 1); // PROCESSING x maxRetries + FAILED x 1
-            // Check the final save was for FAILED status
-            expect(ir.save).toHaveBeenLastCalledWith(expect.objectContaining({ status: JobStatus.FAILED }));
-
-            jest.spyOn(Math, 'random').mockRestore();
-            jest.useRealTimers();
+            expect(result.status).toBe(JobStatus.FAILED);
+            expect(result.errorMessage).toBe('Queue processing error');
+            expect(inferenceRepository.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.FAILED, errorMessage: 'Queue processing error' }));
         });
 
-        it('should skip processing if job status is already PROCESSING', async () => {
-            const ir = inferenceRepository!;
-            const mockProcessingJob = { ...mockPendingJob, status: JobStatus.PROCESSING };
-            ir.findOne.mockResolvedValue(mockProcessingJob);
+        it('DB에만 있고 큐에 없는 작업의 상태를 반환해야 함', async () => {
+            mockInference.status = JobStatus.FAILED;
+            // @ts-ignore - jobQueueId 타입 오류 무시 (null 할당 허용)
+            mockInference.jobQueueId = null;
+            inferenceRepository.findOne.mockResolvedValue(mockInference);
 
-            await (service as any).simulateAiProcessingWithRetry(jobId);
+            const result = await service.getJobStatus(jobId, userId);
 
-            expect(ir.findOne).toHaveBeenCalledTimes(1);
-            expect(ir.save).not.toHaveBeenCalled(); // Should not attempt to save status again
+            expect(mockInferenceQueue.getJob).not.toHaveBeenCalled();
+            expect(result.status).toBe(JobStatus.FAILED);
+            expect(inferenceRepository.save).not.toHaveBeenCalled();
         });
 
-        it('should skip processing if job status is already COMPLETED', async () => {
-            const ir = inferenceRepository!;
-            const mockCompletedJob = { ...mockPendingJob, status: JobStatus.COMPLETED };
-            ir.findOne.mockResolvedValue(mockCompletedJob);
-
-            await (service as any).simulateAiProcessingWithRetry(jobId);
-
-            expect(ir.findOne).toHaveBeenCalledTimes(1);
-            expect(ir.save).not.toHaveBeenCalled();
+        it('작업을 찾을 수 없으면 NotFoundException을 던져야 함', async () => {
+            inferenceRepository.findOne.mockResolvedValue(null);
+            await expect(service.getJobStatus(jobId, userId)).rejects.toThrow(NotFoundException);
         });
-
-        it('should handle DB error during status update and eventually fail', async () => {
-            jest.useFakeTimers();
-            const ir = inferenceRepository!;
-            ir.findOne.mockResolvedValue(mockPendingJob);
-            // Simulate save failing on the first attempt (PROCESSING update)
-            ir.save.mockRejectedValueOnce(new Error('DB write error'));
-
-            await (service as any).simulateAiProcessingWithRetry(jobId);
-
-            const maxRetries = (service as any).MAX_RETRIES;
-            const retryDelay = (service as any).RETRY_DELAY_MS;
-            // Advance timers for all retries + delays (assuming failure on each attempt due to error)
-            for (let i = 0; i < maxRetries; i++) {
-                await jest.advanceTimersByTimeAsync(retryDelay + 100); // Advance past retry delay
-            }
-
-            // Check that findOne was called multiple times (for retries)
-            expect(ir.findOne).toHaveBeenCalledTimes(maxRetries); // Called before each retry attempt
-            // Check the final save attempt was to set status to FAILED
-            // Note: Depending on error handling, save might be called less or differently
-            // Here, we expect the final attempt to mark as FAILED in DB after max retries due to error
-            expect(ir.save).toHaveBeenLastCalledWith(expect.objectContaining({ status: JobStatus.FAILED }));
-
-            jest.useRealTimers();
-        });
-
     });
 }); 

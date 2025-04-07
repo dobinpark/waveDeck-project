@@ -8,7 +8,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 
 /**
- * 'inference-queue' 큐의 작업을 처리하는 프로세서입니다.
+ * 'inference-queue' 큐의 작업을 처리하는 프로세서
  * NestJS 워커 호스트로 실행됩니다.
  */
 @Processor('inference-queue')
@@ -18,9 +18,7 @@ export class InferenceProcessor {
     constructor(
         @InjectRepository(Inference)
         private inferenceRepository: Repository<Inference>,
-        // Inject other services if needed for AI processing (e.g., HttpService)
     ) {
-        // super(); call removed
     }
 
     /**
@@ -30,12 +28,11 @@ export class InferenceProcessor {
      */
     async processInference(job: Job<{ inferenceId: number }>): Promise<void> {
         const { inferenceId } = job.data;
-        this.logger.log(`Processing job ${job.id} (DB ID: ${inferenceId}), attempt ${job.attemptsMade + 1}/${job.opts.attempts || 1}`);
+        this.logger.log(`작업 처리 중: Job ID ${job.id} (DB ID: ${inferenceId}), 시도 ${job.attemptsMade + 1}/${job.opts.attempts || 1}`);
 
         const inference = await this.inferenceRepository.findOne({ where: { id: inferenceId } });
         if (!inference) {
-            this.logger.error(`Inference record not found for ID: ${inferenceId}. Skipping job ${job.id}.`);
-            // 더 이상 처리할 수 없으므로 오류를 발생시키지 않고 종료 (재시도 방지)
+            this.logger.error(`Inference 레코드를 찾을 수 없음: ID ${inferenceId}. 작업 건너뜀: Job ID ${job.id}.`);
             return;
         }
 
@@ -47,12 +44,12 @@ export class InferenceProcessor {
         try {
             // 1. 랜덤 지연 시간 시뮬레이션 (1~5초)
             const delay = Math.random() * 4000 + 1000; // 1000ms to 5000ms
-            this.logger.log(`Simulating AI processing for job ${job.id} (DB ID: ${inferenceId}) with delay: ${delay.toFixed(0)}ms`);
+            this.logger.log(`AI 처리 시뮬레이션 중: Job ID ${job.id} (DB ID: ${inferenceId}), 지연 시간: ${delay.toFixed(0)}ms`);
             await new Promise(resolve => setTimeout(resolve, delay));
 
             // 2. 랜덤 실패 시뮬레이션 (10% 확률)
             if (Math.random() < 0.1) { // 10% chance to fail
-                this.logger.warn(`Simulating AI failure for job ${job.id} (DB ID: ${inferenceId})`);
+                this.logger.warn(`AI 실패 시뮬레이션: Job ID ${job.id} (DB ID: ${inferenceId})`);
                 throw new Error('Simulated AI failure');
             }
 
@@ -73,13 +70,14 @@ export class InferenceProcessor {
             inference.convertedPath = convertedPath;
             inference.convertedFileSize = convertedFileSize;
             inference.processingFinishedAt = new Date();
-            inference.errorMessage = ''; // 이전 오류 메시지 제거
+            // @ts-ignore - Ignoring potential type mismatch for nullable errorMessage
+            inference.errorMessage = null; // 이전 오류 메시지 제거
             await this.inferenceRepository.save(inference);
-            this.logger.log(`Job ${job.id} (DB ID: ${inferenceId}) completed successfully.`);
+            this.logger.log(`작업 완료: Job ID ${job.id} (DB ID: ${inferenceId})`);
 
         } catch (error) {
             // 5. DB 업데이트 (실패)
-            this.logger.error(`Job ${job.id} (DB ID: ${inferenceId}) failed: ${error.message}`);
+            this.logger.error(`작업 실패: Job ID ${job.id} (DB ID: ${inferenceId}), 오류: ${error.message}`);
             inference.status = JobStatus.FAILED;
             inference.errorMessage = error.message;
             inference.processingFinishedAt = new Date();

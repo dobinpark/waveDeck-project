@@ -43,15 +43,15 @@ export class InferenceService {
      * @throws InternalServerErrorException - DB 저장 또는 큐 추가 실패 시
      */
     async requestTransformation(dto: InferenceRequestDto): Promise<{ jobId: number; jobQueueId: string; statusCheckUrl: string }> {
-        this.logger.log(`Received transformation request: ${JSON.stringify(dto)}`);
+        this.logger.log(`변환 요청 수신: ${JSON.stringify(dto)}`);
 
         // 1. 원본 파일 조회
         const upload = await this.uploadRepository.findOne({ where: { id: dto.fileId, userId: dto.userId } });
         if (!upload) {
-            this.logger.warn(`Upload not found for fileId: ${dto.fileId}, userId: ${dto.userId}`);
-            throw new NotFoundException(`File with ID ${dto.fileId} not found or does not belong to user ${dto.userId}`);
+            this.logger.warn(`업로드 파일을 찾을 수 없음: fileId: ${dto.fileId}, userId: ${dto.userId}`);
+            throw new NotFoundException(`파일 ID ${dto.fileId}를 찾을 수 없거나 사용자 ${dto.userId}의 파일이 아닙니다.`);
         }
-        this.logger.log(`Found upload record: ${JSON.stringify(upload)}`);
+        this.logger.log(`업로드 레코드 확인: ${JSON.stringify(upload)}`);
 
         // 2. DB에 Inference 작업 생성
         const newDbJob = this.inferenceRepository.create({
@@ -65,7 +65,7 @@ export class InferenceService {
 
         try {
             const savedDbJob = await this.inferenceRepository.save(newDbJob);
-            this.logger.log(`Created new inference DB job with ID: ${savedDbJob.id}`);
+            this.logger.log(`새로운 Inference DB 작업 생성됨. ID: ${savedDbJob.id}`);
 
             // 3. BullMQ 큐에 작업 추가
             const queueJob = await this.inferenceQueue.add(
@@ -84,7 +84,7 @@ export class InferenceService {
                     removeOnFail: false, // 실패 시 큐에 유지 (수동 확인/재처리용)
                 }
             );
-            this.logger.log(`Added job to inference-queue with Queue Job ID: ${queueJob.id!}`);
+            this.logger.log(`작업을 inference-queue에 추가함. 큐 작업 ID: ${queueJob.id!}`);
 
             // 4. DB 상태 QUEUED로 업데이트하고 jobQueueId 저장
             savedDbJob.jobQueueId = queueJob.id!; // BullMQ Job ID 저장
@@ -92,15 +92,16 @@ export class InferenceService {
             await this.inferenceRepository.save(savedDbJob);
 
             // 5. 결과 반환
-            const statusCheckUrl = `/api/v1/inference/status/${savedDbJob.id}`;
+            const statusCheckUrl = `/api/v1/inference/status/${savedDbJob.id}`; // 상태 조회 엔드포인트 URL
             return {
                 jobId: savedDbJob.id,
                 jobQueueId: queueJob.id!,
                 statusCheckUrl: statusCheckUrl,
             };
         } catch (error) {
-            this.logger.error(`Failed to save inference job or add to queue: ${error.message}`, error.stack);
-            throw new InternalServerErrorException('Failed to initiate inference job');
+            this.logger.error(`Inference 작업 저장 또는 큐 추가 실패: ${error.message}`, error.stack);
+            // TODO: DB 작업 생성 후 큐 추가 실패 시 롤백 로직 고려
+            throw new InternalServerErrorException('Inference 작업 시작 실패');
         }
     }
 
@@ -113,7 +114,7 @@ export class InferenceService {
      * @throws NotFoundException - 해당 ID와 사용자 ID로 작업을 찾을 수 없는 경우
      */
     async getJobStatus(jobId: number, userId: number): Promise<JobStatusResponseDto> {
-        this.logger.log(`Fetching job status for jobId=${jobId}, userId=${userId}`);
+        this.logger.log(`작업 상태 조회 요청: jobId=${jobId}, userId=${userId}`);
 
         // 1. DB에서 Inference 정보 조회
         const inference = await this.inferenceRepository.findOne({
@@ -122,7 +123,7 @@ export class InferenceService {
         });
 
         if (!inference) {
-            throw new NotFoundException(`Inference job with ID ${jobId} not found for user ${userId}`);
+            throw new NotFoundException(`Inference 작업 ID ${jobId}를 사용자 ${userId}에 대해 찾을 수 없습니다.`);
         }
 
         let queueJob: Job | null = null;
@@ -130,7 +131,7 @@ export class InferenceService {
             try {
                 queueJob = await this.inferenceQueue.getJob(inference.jobQueueId);
             } catch (error) {
-                this.logger.warn(`Could not retrieve job ${inference.jobQueueId} from queue: ${error.message}`);
+                this.logger.warn(`큐에서 작업 ${inference.jobQueueId} 조회 실패: ${error.message}`);
                 // 큐에서 작업을 찾을 수 없어도 DB 상태를 기반으로 응답할 수 있음
             }
         }
@@ -149,7 +150,7 @@ export class InferenceService {
 
         if (queueJob) {
             const queueStatus = await queueJob.getState();
-            this.logger.debug(`Job ${queueJob.id} status in queue: ${queueStatus}`);
+            this.logger.debug(`큐 내 작업 상태: Job ID ${queueJob.id}, 상태: ${queueStatus}`);
 
             // DB 상태와 큐 상태 동기화 (예: DB는 QUEUED인데 큐는 active)
             if (queueStatus === 'active' && inference.status !== JobStatus.PROCESSING) {
@@ -158,29 +159,26 @@ export class InferenceService {
                 response.status = JobStatus.COMPLETED;
             } else if (queueStatus === 'failed' && inference.status !== JobStatus.FAILED) {
                 response.status = JobStatus.FAILED;
-                response.errorMessage = queueJob.failedReason || inference.errorMessage || 'Unknown error';
+                response.errorMessage = queueJob.failedReason || inference.errorMessage || '알 수 없는 오류'; // Unknown error -> 알 수 없는 오류
             } else if (queueStatus === 'waiting' || queueStatus === 'delayed') {
                 response.status = JobStatus.QUEUED;
                 // 대기열 위치 추정 (정확하지 않을 수 있음)
-                // const waitingCount = await this.inferenceQueue.getWaitingCount();
-                // response.queuePosition = waitingCount > 0 ? waitingCount : null;
                 // BullMQ v5+ 에서는 getWaitingCount() 만으로 특정 job의 위치 파악 어려움
             }
 
             // 큐 상태가 최종 상태일 경우 DB 업데이트 (선택적)
             if (response.status !== inference.status) {
-                this.logger.log(`Updating DB status for job ${inference.id} from ${inference.status} to ${response.status}`);
-                inference.status = response.status;
-                if (response.status === JobStatus.FAILED) inference.errorMessage = response.errorMessage;
-                await this.inferenceRepository.save(inference).catch(err => {
-                    this.logger.error(`Failed to update DB status for job ${inference.id}: ${err.message}`);
-                });
-            }
+                 this.logger.log(`DB 상태 업데이트: Job ID ${inference.id} (${inference.status} -> ${response.status})`);
+                 inference.status = response.status;
+                 if(response.status === JobStatus.FAILED) inference.errorMessage = response.errorMessage;
+                 await this.inferenceRepository.save(inference).catch(err => {
+                     this.logger.error(`DB 상태 업데이트 실패: Job ID ${inference.id}, 오류: ${err.message}`);
+                 });
+             }
         }
 
         // 3. 완료 상태일 경우 결과 및 미리보기 URL 추가
         if (response.status === JobStatus.COMPLETED && inference.convertedPath) {
-            // Ensure forward slashes for URL
             const previewUrlPath = `/${inference.convertedPath.replace(/\\/g, '/')}`;
             response.result = {
                 inferenceId: inference.id,

@@ -17,7 +17,7 @@ import { JobStatusResponseDto } from './dto/job-status-response.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam } from '@nestjs/swagger';
 
 /**
- * AI 음성 변환(Inference) 관련 API 엔드포인트를 처리하는 컨트롤러입니다.
+ * AI 음성 변환(Inference) 관련 API 엔드포인트를 처리하는 컨트롤러
  */
 @ApiTags('Inference')
 @Controller('api/v1/inference')
@@ -33,22 +33,20 @@ export class InferenceController {
      * @returns 생성된 작업 정보 (DB ID, 큐 ID, 상태 조회 URL)
      */
     @Post()
-    @HttpCode(HttpStatus.ACCEPTED) // Use 202 Accepted for async operations
-    @ApiOperation({ summary: 'Request AI voice transformation', description: 'Submits a job to the inference queue.' })
+    @HttpCode(HttpStatus.ACCEPTED) // 비동기 작업이므로 202 Accepted 사용
+    @ApiOperation({ summary: 'AI 음성 변환 요청', description: '추론 큐에 작업을 제출합니다.' })
     @ApiBody({ type: InferenceRequestDto })
-    @ApiResponse({ status: 202, description: 'Job accepted for processing.', type: Object }) // Update response type if needed
-    @ApiResponse({ status: 400, description: 'Bad Request (e.g., invalid input)' })
-    @ApiResponse({ status: 404, description: 'Not Found (e.g., fileId not found)' })
+    @ApiResponse({ status: 202, description: '작업 처리 요청 수락됨.', type: Object })
+    @ApiResponse({ status: 400, description: '잘못된 요청 (예: 유효하지 않은 입력)' })
+    @ApiResponse({ status: 404, description: '찾을 수 없음 (예: fileId 없음)' })
     async requestTransformation(
         @Body() dto: InferenceRequestDto,
-        // @Req() req: any, // Uncomment if using AuthGuard and req.user
     ) {
-        this.logger.log(`POST /api/v1/inference - Request received: ${JSON.stringify(dto)}`);
-        // TODO: Replace hardcoded userId with actual user ID from Auth context (e.g., req.user.id)
-        const userId = dto.userId || 1; // Temporary placeholder
+        this.logger.log(`/api/v1/inference 요청 수신: ${JSON.stringify(dto)}`);
+        const userId = dto.userId || 1;
         const result = await this.inferenceService.requestTransformation({ ...dto, userId });
-        this.logger.log(`POST /api/v1/inference - Job submitted: ${JSON.stringify(result)}`);
-        return { data: result, message: 'Inference job accepted and queued.' };
+        this.logger.log(`/api/v1/inference 작업 제출됨: ${JSON.stringify(result)}`);
+        return { data: result, message: 'Inference 작업이 수락되어 큐에 등록되었습니다.' };
     }
 
     /**
@@ -57,23 +55,21 @@ export class InferenceController {
      * @param req Request 객체 (사용자 정보 포함 가정)
      * @returns 작업 상태 정보
      */
-    @Get('status/:jobId') // Corrected path
-    @ApiOperation({ summary: 'Get inference job status', description: 'Retrieves the status and result (if completed) of an inference job.' })
-    @ApiParam({ name: 'jobId', description: 'The DB ID of the inference job', type: Number })
-    @ApiResponse({ status: 200, description: 'Job status retrieved successfully.', type: JobStatusResponseDto })
-    @ApiResponse({ status: 404, description: 'Job not found.' })
+    @Get('status/:jobId')
+    @ApiOperation({ summary: 'Inference 작업 상태 조회', description: 'Inference 작업의 상태 및 결과(완료 시)를 조회합니다.' })
+    @ApiParam({ name: 'jobId', description: 'Inference 작업의 DB ID', type: Number })
+    @ApiResponse({ status: 200, description: '작업 상태 조회 성공.', type: JobStatusResponseDto })
+    @ApiResponse({ status: 404, description: '작업을 찾을 수 없음.' })
     async getJobStatus(
         @Param('jobId', ParseIntPipe) jobId: number,
-        // @Req() req: any, // Uncomment if using AuthGuard and req.user
-    ): Promise<{ data: JobStatusResponseDto; message: string }> { // Return type updated
-        this.logger.log(`GET /api/v1/inference/status/${jobId} - Request received`);
-        // TODO: Replace hardcoded userId with actual user ID from Auth context
-        const userId = 1; // Temporary placeholder
+    ): Promise<{ data: JobStatusResponseDto; message: string }> {
+        this.logger.log(`/api/v1/inference/status/${jobId} 요청 수신`);
+        const userId = 1;
         const jobStatus = await this.inferenceService.getJobStatus(jobId, userId);
-        this.logger.log(`GET /api/v1/inference/status/${jobId} - Status retrieved: ${JSON.stringify(jobStatus)}`);
+        this.logger.log(`/api/v1/inference/status/${jobId} 상태 조회 완료: ${JSON.stringify(jobStatus)}`);
         return {
             data: jobStatus,
-            message: `Status for job ${jobId} retrieved successfully.`,
+            message: `작업 ${jobId}의 상태를 성공적으로 조회했습니다.`,
         };
     }
 }

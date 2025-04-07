@@ -5,9 +5,9 @@ import { Logger } from '@nestjs/common';
 import { Job, JobsOptions } from 'bullmq';
 import { InferenceProcessor } from './inference.processor';
 import { Inference, JobStatus } from './entities/inference.entity';
-import { Upload } from '../upload/entities/upload.entity'; // Needed for mock inference object
+import { Upload } from '../upload/entities/upload.entity';
 
-// Define a specific mock type for the repository methods used
+// 사용되는 리포지토리 메서드에 대한 구체적인 Mock 타입 정의
 type SpecificMockRepository<T extends Record<string, any>> = Pick<Repository<T>, 'findOne' | 'save'> & {
     findOne: jest.Mock;
     save: jest.Mock;
@@ -18,7 +18,7 @@ const createMockRepository = <T extends Record<string, any> = any>(): SpecificMo
     save: jest.fn(),
 });
 
-// Mock BullMQ Job object with opts
+// opts를 포함한 BullMQ Job 객체 Mock 생성
 const createMockJob = (
     data: any,
     attemptsMade: number = 0,
@@ -31,9 +31,9 @@ const createMockJob = (
         attemptsMade: attemptsMade,
         opts: {
             attempts: 3,
-            // @ts-ignore - Ignoring timeout type issue
+            // @ts-ignore - timeout 속성이 존재하지 않음
             timeout: 10000,
-             ...opts
+            ...opts
         },
         getState: jest.fn().mockResolvedValue('waiting'),
         updateData: jest.fn().mockResolvedValue(undefined),
@@ -53,7 +53,6 @@ describe('InferenceProcessor', () => {
                     provide: getRepositoryToken(Inference),
                     useValue: createMockRepository<Inference>(),
                 },
-                // Logger, // Provide if needed, often default works
             ],
         }).compile();
 
@@ -62,7 +61,6 @@ describe('InferenceProcessor', () => {
             getRepositoryToken(Inference),
         );
 
-        // Spy on logger
         loggerSpy = jest.spyOn((processor as any).logger, 'log').mockImplementation();
         jest.spyOn((processor as any).logger, 'error').mockImplementation();
         jest.spyOn((processor as any).logger, 'warn').mockImplementation();
@@ -70,7 +68,7 @@ describe('InferenceProcessor', () => {
         jest.clearAllMocks();
     });
 
-    it('should be defined', () => {
+    it('정의되어야 함', () => {
         expect(processor).toBeDefined();
     });
 
@@ -81,7 +79,7 @@ describe('InferenceProcessor', () => {
         let mockInferenceEntity: Inference;
 
         beforeEach(() => {
-            // @ts-ignore - Ignoring potential type mismatch for nullable fields like convertedPath
+            // @ts-ignore - nullable 필드(예: convertedPath)의 잠재적 타입 불일치 무시
             mockInferenceEntity = {
                 id: inferenceId,
                 userId: 1,
@@ -99,17 +97,17 @@ describe('InferenceProcessor', () => {
                 processingStartedAt: null,
                 processingFinishedAt: null,
             } as Inference;
-            jest.spyOn(Math, 'random').mockRestore();
+            jest.spyOn(Math, 'random').mockRestore(); // 각 테스트 전에 random 복원
             inferenceRepository.findOne.mockResolvedValue(mockInferenceEntity);
-            inferenceRepository.save.mockImplementation(entity => Promise.resolve(entity as Inference));
+            inferenceRepository.save.mockImplementation(entity => Promise.resolve(entity as Inference)); // 저장된 엔티티를 반환하도록 save Mock
         });
 
-        it('should process job successfully', async () => {
-            jest.spyOn(Math, 'random').mockReturnValue(0.5);
+        it('작업을 성공적으로 처리해야 함', async () => {
+            jest.spyOn(Math, 'random').mockReturnValue(0.5); // 성공 보장 (실패는 > 0.1)
             await processor.processInference(mockJob as Job<{ inferenceId: number }>);
 
             expect(inferenceRepository.findOne).toHaveBeenCalledWith({ where: { id: inferenceId } });
-            expect(inferenceRepository.save).toHaveBeenCalledTimes(2);
+            expect(inferenceRepository.save).toHaveBeenCalledTimes(2); // PROCESSING 및 COMPLETED
             expect(inferenceRepository.save).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: JobStatus.PROCESSING, processingStartedAt: expect.any(Date) }));
             expect(inferenceRepository.save).toHaveBeenNthCalledWith(2, expect.objectContaining({
                 status: JobStatus.COMPLETED,
@@ -118,15 +116,15 @@ describe('InferenceProcessor', () => {
                 processingFinishedAt: expect.any(Date),
                 errorMessage: null,
             }));
-            expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('completed successfully'));
+            expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('작업 완료'));
         });
 
-        it('should throw error and mark as FAILED if AI simulation fails', async () => {
-            jest.spyOn(Math, 'random').mockReturnValue(0.05);
+        it('AI 시뮬레이션 실패 시 에러를 던지고 FAILED로 마크해야 함', async () => {
+            jest.spyOn(Math, 'random').mockReturnValue(0.05); // 실패 보장 ( < 0.1 )
             await expect(processor.processInference(mockJob as Job<{ inferenceId: number }>)).rejects.toThrow('Simulated AI failure');
 
-            expect(inferenceRepository.findOne).toHaveBeenCalledTimes(1);
-            expect(inferenceRepository.save).toHaveBeenCalledTimes(2);
+            expect(inferenceRepository.findOne).toHaveBeenCalledTimes(1); // 시작 시 한 번만 호출됨
+            expect(inferenceRepository.save).toHaveBeenCalledTimes(2); // PROCESSING 및 FAILED
             expect(inferenceRepository.save).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: JobStatus.PROCESSING, processingStartedAt: expect.any(Date) }));
             expect(inferenceRepository.save).toHaveBeenNthCalledWith(2, expect.objectContaining({
                 status: JobStatus.FAILED,
@@ -135,16 +133,16 @@ describe('InferenceProcessor', () => {
             }));
         });
 
-        it('should not throw error and skip processing if Inference entity not found', async () => {
+        it('Inference 엔티티를 찾을 수 없을 경우 에러 없이 처리를 건너뛰어야 함', async () => {
             inferenceRepository.findOne.mockResolvedValue(null);
             await processor.processInference(mockJob as Job<{ inferenceId: number }>);
 
             expect(inferenceRepository.findOne).toHaveBeenCalledWith({ where: { id: inferenceId } });
             expect(inferenceRepository.save).not.toHaveBeenCalled();
-            expect(loggerSpy).not.toHaveBeenCalledWith(expect.stringContaining('Processing job'));
+            expect(loggerSpy).not.toHaveBeenCalledWith(expect.stringContaining('작업 처리 중'));
         });
 
-        it('should throw error if DB save fails during PROCESSING update', async () => {
+        it('PROCESSING 업데이트 중 DB 저장 실패 시 에러를 던져야 함', async () => {
             const dbError = new Error('DB save failed during PROCESSING update');
             inferenceRepository.save.mockRejectedValueOnce(dbError);
             await expect(processor.processInference(mockJob as Job<{ inferenceId: number }>)).rejects.toThrow(dbError);
@@ -154,7 +152,7 @@ describe('InferenceProcessor', () => {
             expect(inferenceRepository.save).toHaveBeenCalledWith(expect.objectContaining({ status: JobStatus.PROCESSING }));
         });
 
-        // TODO: Add tests for retries
-        // TODO: Add tests for DB save failures during COMPLETED/FAILED updates
+        // TODO: 재시도 테스트 추가
+        // TODO: COMPLETED/FAILED 업데이트 중 DB 저장 실패 테스트 추가
     });
 });

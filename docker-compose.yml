@@ -2,58 +2,59 @@ version: '3.8'
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: dockerfile
+    build: .
+    container_name: wavedeck_app
     ports:
-      - '${PORT:-3000}:${PORT:-3000}'
+      - "3000:3000"
+    volumes:
+      - ./src:/usr/src/app/src
+      - /usr/src/app/node_modules
     environment:
-      DB_HOST: db
+      NODE_ENV: development
+      DB_TYPE: mysql
+      DB_HOST: mysql
       DB_PORT: 3306
-      DB_USERNAME: ${DB_USERNAME:-nestjs_user}
-      DB_PASSWORD: ${DB_PASSWORD:-nestjs_password}
-      DB_DATABASE: ${DB_DATABASE:-wavedeck}
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      NODE_ENV: ${NODE_ENV:-development}
-      PORT: ${PORT:-3000}
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+    env_file:
+      - .env
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:${PORT:-3000}/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - mysql
+      - redis
+    command: npm run start:dev
 
-  db:
+  mysql:
     image: mysql:8.0
-    container_name: mysql-db
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-ddgh930810}
-      MYSQL_DATABASE: ${DB_DATABASE:-wavedeck}
-      MYSQL_USER: ${DB_USERNAME:-nestjs_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-nestjs_password}
+    container_name: wavedeck_mysql
     ports:
-      - '${DB_PORT:-3306}:3306'
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${DB_USERNAME:-nestjs_user}", "-p${DB_PASSWORD:-nestjs_password}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "3306", "-u", "root", "-p${DB_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: redis:alpine
-    container_name: redis-cache
+    image: redis:7-alpine
+    container_name: wavedeck_redis
     ports:
-      - '6379:6379'
+      - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   mysql_data:
