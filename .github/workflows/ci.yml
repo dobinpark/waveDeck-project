@@ -10,18 +10,18 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    # Add services for E2E testing
+    # E2E 테스트를 위한 서비스 추가
     services:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: ddgh930810 # Should match docker-compose for consistency, but use secrets in real projects
-          MYSQL_DATABASE: wavedeck_test # Use a separate test database
-          MYSQL_USER: nestjs_user
-          MYSQL_PASSWORD: nestjs_password
+          MYSQL_ROOT_PASSWORD: password # 일관성을 위해 docker-compose와 일치시키는 것이 좋지만, 실제 프로젝트에서는 secrets 사용
+          MYSQL_DATABASE: database # 별도의 테스트 데이터베이스 사용
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
         ports:
-          - 3306:3306 # Port mapping needed for the job container to access the service
-        options: >- # Health check to wait until MySQL is ready
+          - 3306:3306 # 잡 컨테이너가 서비스에 접근하기 위해 포트 매핑 필요
+        options: >- # MySQL 준비 완료까지 대기하는 Health check
           --health-cmd="mysqladmin ping --silent" 
           --health-interval=10s 
           --health-timeout=5s 
@@ -32,35 +32,36 @@ jobs:
         node-version: [18.x] # Dockerfile과 일치하는 Node.js 버전 사용
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
 
-    - name: Install dependencies
-      run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Run linter
-      run: npm run lint
+      - name: Run linter
+        run: npm run lint
 
-    - name: Build project
-      run: npm run build --if-present
+      - name: Build project
+        run: npm run build --if-present
 
-    - name: Run unit/integration tests with coverage
-      run: npm run test:cov
+      - name: Run unit/integration tests with coverage
+        run: npm run test:cov
 
-    - name: Run E2E tests
-      run: npm run test:e2e
-      env: # Set environment variables for E2E tests to connect to the service DB
-        DB_HOST: 127.0.0.1 # Use localhost for service container access
-        DB_PORT: 3306
-        DB_USERNAME: nestjs_user
-        DB_PASSWORD: nestjs_password
-        DB_DATABASE: wavedeck_test # Connect to the test database
-      # E2E 테스트 (npm run test:e2e)는 데이터베이스 등 외부 서비스가 필요할 수 있어
-      # 추가 설정(예: services 키워드 사용)이 필요할 수 있습니다.
-      # 우선 단위/통합 테스트 위주로 실행합니다. 
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env: # E2E 테스트가 서비스 DB에 연결하도록 환경 변수 설정
+          DB_HOST: 127.0.0.1 # 서비스 컨테이너 접근을 위해 localhost 사용
+          DB_PORT: 3306
+          DB_USERNAME: user
+          DB_PASSWORD: password
+          DB_DATABASE: database # 테스트 데이터베이스에 연결
+
+        # E2E 테스트 (npm run test:e2e)는 데이터베이스 등 외부 서비스가 필요할 수 있어
+        # 추가 설정(예: services 키워드 사용)이 필요할 수 있습니다.
+        # 우선 단위/통합 테스트 위주로 실행합니다.

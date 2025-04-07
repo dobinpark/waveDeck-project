@@ -89,7 +89,7 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 ### 설정 단계
 
 1.  **저장소 클론**:
-    ```bash
+```bash
     git clone <repository-url>
     cd waveDeck-project
     ```
@@ -175,7 +175,7 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
 ### 5.1. 파일 업로드 (`POST /upload/audio`)
 
 - **`curl` 예시**:
-  ```bash
+```bash
   curl --location --request POST 'http://localhost:3000/api/v1/upload/audio' \
   --form 'file=@"/path/to/your/audio.wav"' \
   --form 'userId="1"' \
@@ -300,7 +300,7 @@ Postman, Insomnia 또는 `curl`과 같은 도구를 사용하여 API를 테스�
 ### 5.4. 파일 삭제 (`DELETE /upload/audio/:id`)
 
 - **`curl` 예시** (삭제할 파일의 `fileId` 사용):
-  ```bash
+```bash
   curl --location --request DELETE 'http://localhost:3000/api/v1/upload/audio/1' \
   --header 'Content-Type: application/json' \
   --data-raw '{
