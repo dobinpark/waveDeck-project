@@ -13,6 +13,8 @@ import { ResponseInterceptor } from './common/interceptor/response.interceptor';
 import { BadRequestException } from '@nestjs/common';
 import { validationSchema } from './common/config/validationSchema';
 import { HealthController } from './health.controller';
+import { Upload } from './upload/entities/upload.entity';
+import { Inference } from './inference/entities/inference.entity';
 
 @Module({
   imports: [
@@ -30,7 +32,10 @@ import { HealthController } from './health.controller';
         username: configService.get<string>('DB_USERNAME'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_DATABASE'),
-        entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+        entities: [
+          Upload,
+          Inference,
+        ],
         migrations: [__dirname + '/../migrations/*{.ts,.js}'],
         synchronize: false,
         logging: true,
