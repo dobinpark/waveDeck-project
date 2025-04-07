@@ -1,3 +1,22 @@
+import * as crypto from 'crypto';
+
+// Node.js v19 이전 환경 호환성 또는 예상치 못한 undefined 방지
+if (typeof global.crypto === 'undefined') {
+  Object.defineProperty(global, 'crypto', {
+    value: crypto,
+    writable: false, // 필요에 따라 true로 변경 가능
+    configurable: true,
+  });
+}
+// crypto.subtle 보장 (Node.js 환경에서는 보통 없지만, TypeORM 등이 기대할 수도 있음 - 안전 장치)
+if (typeof global.crypto.subtle === 'undefined') {
+  Object.defineProperty(global.crypto, 'subtle', {
+    value: crypto.webcrypto.subtle,
+    writable: false,
+    configurable: true,
+  });
+}
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
