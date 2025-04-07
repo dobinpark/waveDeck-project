@@ -1,4 +1,4 @@
-FROM node:18-alpine As development
+FROM node:18 As development
 WORKDIR /usr/src/app
 COPY package*.json ./
 
@@ -7,7 +7,6 @@ COPY tsconfig*.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build
 EXPOSE 3000
 CMD ["npm", "run", "start:dev"]
 
