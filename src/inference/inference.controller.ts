@@ -20,7 +20,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam } from '@nestjs/s
  * AI 음성 변환(Inference) 관련 API 엔드포인트를 처리하는 컨트롤러
  */
 @ApiTags('Inference')
-@Controller('api/v1/inference')
+@Controller('/inference')
 export class InferenceController {
     private readonly logger = new Logger(InferenceController.name);
 
@@ -33,7 +33,7 @@ export class InferenceController {
      * @returns 생성된 작업 정보 (DB ID, 큐 ID, 상태 조회 URL)
      */
     @Post('sts')
-    @HttpCode(HttpStatus.ACCEPTED) // 비동기 작업이므로 202 Accepted 사용
+@HttpCode(HttpStatus.ACCEPTED) // 비동기 작업이므로 202 Accepted 사용
     @ApiOperation({ summary: 'AI 음성 변환 요청', description: '추론 큐에 작업을 제출합니다.' })
     @ApiBody({ type: InferenceRequestDto })
     @ApiResponse({ status: 202, description: '작업 처리 요청 수락됨.', type: Object })

@@ -75,8 +75,11 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 
 -   [Docker](https://www.docker.com/) 설치 및 실행
 -   [Docker Compose](https://docs.docker.com/compose/)
+-   (로컬 실행 시) [Node.js](https://nodejs.org/) v18+, MySQL v8+, Redis v7+
 
-### Docker Compose 사용 (권장)
+### 방법 1: Docker Compose 사용 (권장)
+
+모든 서비스 (앱, DB, Redis)를 Docker 컨테이너로 한 번에 실행합니다.
 
 1.  **저장소 클론**: `git clone <repository-url> && cd waveDeck-project`
 2.  **환경 변수 파일 생성**: 프로젝트 루트에 `.env` 파일 생성 및 설정 (아래 예시 참고).
@@ -103,23 +106,24 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 3.  **실행**: `docker-compose up --build` (백그라운드: `-d` 추가)
 4.  **마이그레이션**: (실행 후 별도 터미널) `docker-compose exec app npm run migration:run`
 5.  **(선택) 시딩**: (실행 후 별도 터미널) `docker-compose exec app npm run seed:run`
-6.  **접속 URL**: `http://localhost:3000` (또는 `docker-compose.yml`에 설정된 포트)
+6.  **접속 URL**: `http://localhost:3000` (또는 `docker-compose.yml`에 설정된 호스트 포트)
 7.  **중지**: `Ctrl + C` 또는 `docker-compose down`
 
-### (참고) 로컬 직접 실행
+### 방법 2: 로컬 Node.js 직접 실행
 
-로컬 환경에 Node.js (v18+), MySQL (v8), Redis (v7+) 설치 필요. `.env` 파일의 `DB_HOST`, `REDIS_HOST`를 `localhost` 등으로 수정.
+로컬 환경에 Node.js, MySQL, Redis가 설치되어 있어야 합니다. `.env` 파일의 `DB_HOST`, `REDIS_HOST`를 `localhost` 등으로 수정해야 합니다.
 
-```bash
-npm install
-npm run migration:run
-# npm run seed:run (Optional)
-npm run start:dev
-```
+1.  **의존성 설치**: `npm install`
+2.  **데이터베이스 마이그레이션**: `npm run migration:run`
+3.  **(선택) 데이터 시딩**: `npm run seed:run`
+4.  **애플리케이션 실행 (개발 모드)**: `npm run start:dev`
+5.  **접속 URL**: `http://localhost:3000` (또는 `.env`의 `PORT` 설정)
 
 ## 5. API 테스트 방법 (API Testing)
 
-Postman, Insomnia 또는 `curl`을 사용하여 테스트하세요. Base URL: `http://localhost:3000/api/v1`
+API 테스트는 아래 제공된 `curl` 예시를 사용하거나 Postman과 같은 API 클라이언트 도구를 활용하여 수행할 수 있습니다. 모든 요청의 Base URL은 `http://localhost:3000/api/v1` 입니다. (Docker 실행 기준)
+
+**(Postman 사용 시) Postman Collection:** [Postman 컬렉션 링크 또는 파일 경로 삽입 - 선택 사항]
 
 ### 5.1. 파일 업로드 (`POST /common/upload/audio`)
 
@@ -183,10 +187,57 @@ Postman, Insomnia 또는 `curl`을 사용하여 테스트하세요. Base URL: `h
 -   **`inference`**: AI 변환 작업 정보 및 상태 저장.
 -   **`migrations`**: TypeORM 마이그레이션 기록.
 
+### 마이그레이션 결과 요약
+
+마이그레이션은 `npm run migration:run` (Docker 환경에서는 `docker-compose exec app npm run migration:run`) 명령어를 통해 실행됩니다. 현재 프로젝트에는 다음과 같은 마이그레이션 파일이 포함되어 있습니다:
+
+-   `src/db/migrations/<timestamp>-InitialSchema.ts`: 프로젝트 초기 스키마를 설정합니다. `upload` 테이블과 `inference` 테이블을 생성하고, 두 테이블 간의 외래 키 관계(Inference -> Upload)를 정의합니다. 이 마이그레이션을 실행하면 애플리케이션 운영에 필요한 모든 테이블이 준비됩니다.
+
 ### 주요 명령어 (Docker 환경)
 
 -   **마이그레이션 실행**: `docker-compose exec app npm run migration:run`
 -   **(선택) 시딩**: `docker-compose exec app npm run seed:run` (샘플 업로드 데이터 생성)
+
+### 데이터 시딩 (Seeding)
+
+-   **목적**: 개발 및 테스트를 위한 초기 샘플 데이터를 생성합니다.
+-   **실행**: `docker-compose exec app npm run seed:run` 명령어를 사용하여 수동으로 실행합니다.
+-   **내용**: `src/db/seeds/upload.seeder.ts` 로직에 따라 `userId: 1`에 대한 3개의 샘플 오디오 파일 업로드 정보 (`upload` 테이블)를 생성합니다. (주의: DB 레코드만 생성되며 실제 파일은 생성되지 않습니다.)
+-   **확장**: `src/db/seeds/` 디렉토리에 Seeder 파일을 추가하고 `src/db/seeds/main.seeder.ts`에서 호출하여 확장할 수 있습니다.
+
+### 샘플 쿼리 및 예상 결과
+
+다음은 데이터베이스 상태를 확인하기 위한 몇 가지 샘플 SQL 쿼리와 예상 결과입니다. (데이터는 시딩 실행 후를 가정합니다.)
+
+1.  **모든 업로드 파일 조회**:
+    ```sql
+    SELECT * FROM upload;
+    ```
+    *   예상 결과: 시딩된 3개의 업로드 레코드(id=1, 2, 3) 및 API를 통해 추가된 업로드 레코드들이 표시됩니다.
+
+2.  **특정 사용자의 업로드 파일 조회 (userId = 1)**:
+    ```sql
+    SELECT * FROM upload WHERE userId = 1;
+    ```
+    *   예상 결과: `userId`가 1인 업로드 레코드들 (시딩된 3개 포함)만 표시됩니다.
+
+3.  **모든 AI 변환 작업 조회**:
+    ```sql
+    SELECT * FROM inference;
+    ```
+    *   예상 결과: AI 변환 요청 API를 통해 생성된 모든 작업 레코드들이 표시됩니다. (초기 상태에서는 비어 있습니다.)
+
+4.  **특정 원본 파일(uploadId = 1)에 대한 모든 변환 작업 조회**:
+    ```sql
+    SELECT * FROM inference WHERE uploadId = 1;
+    ```
+    *   예상 결과: `upload` 테이블의 `id`가 1인 파일을 사용하여 생성된 변환 작업 레코드들만 표시됩니다.
+
+5.  **완료된 변환 작업 조회**:
+    ```sql
+    SELECT * FROM inference WHERE status = 'completed';
+    ```
+    *   예상 결과: 상태가 `completed`인 변환 작업 레코드들만 표시됩니다.
 
 ## 7. 테스트 (Testing)
 
