@@ -1,4 +1,4 @@
-import { Processor } from '@nestjs/bullmq';
+import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,13 +12,14 @@ import * as path from 'path';
  * NestJS 워커 호스트로 실행됩니다.
  */
 @Processor('inference-queue')
-export class InferenceProcessor {
+export class InferenceProcessor extends WorkerHost {
     private readonly logger = new Logger(InferenceProcessor.name);
 
     constructor(
         @InjectRepository(Inference)
         private inferenceRepository: Repository<Inference>,
     ) {
+        super();
     }
 
     /**
@@ -26,7 +27,7 @@ export class InferenceProcessor {
      * 이 메서드는 AI 모델 추론 과정을 시뮬레이션합니다.
      * @param job 처리할 작업 객체. job.data에 { inferenceId } 포함
      */
-    async processInference(job: Job<{ inferenceId: number }>): Promise<void> {
+    async process(job: Job<{ inferenceId: number }>): Promise<void> {
         const { inferenceId } = job.data;
         this.logger.log(`작업 처리 중: Job ID ${job.id} (DB ID: ${inferenceId}), 시도 ${job.attemptsMade + 1}/${job.opts.attempts || 1}`);
 
@@ -54,23 +55,16 @@ export class InferenceProcessor {
             }
 
             // 3. 성공 시나리오: 결과 파일 경로 및 크기 생성 (Mock)
-            // 실제로는 AI 서버 응답을 받아 처리해야 함
             const originalFileName = path.basename(inference.originalPath);
             const convertedFileName = `converted_${originalFileName}`;
             const convertedPath = path.join(path.dirname(inference.originalPath), convertedFileName);
             const convertedFileSize = Math.floor(Math.random() * 500000) + 100000; // 100KB ~ 600KB
-
-            // (Optional) 실제 파일 생성 시뮬레이션 (필요한 경우)
-            // const dummyContent = Buffer.alloc(convertedFileSize);
-            // await fs.writeFile(convertedPath, dummyContent);
-            // this.logger.log(`Created dummy converted file: ${convertedPath}`);
 
             // 4. DB 업데이트 (성공)
             inference.status = JobStatus.COMPLETED;
             inference.convertedPath = convertedPath;
             inference.convertedFileSize = convertedFileSize;
             inference.processingFinishedAt = new Date();
-            // @ts-ignore - Ignoring potential type mismatch for nullable errorMessage
             inference.errorMessage = null; // 이전 오류 메시지 제거
             await this.inferenceRepository.save(inference);
             this.logger.log(`작업 완료: Job ID ${job.id} (DB ID: ${inferenceId})`);
@@ -88,24 +82,11 @@ export class InferenceProcessor {
         }
     }
 
-    // Remove event listener methods or comment them out
+    // 이벤트 리스너 사용 시 WorkerHost 상속 시 필요 없어짐 (필요 시 onModuleInit 등으로 처리)
     /*
     @OnQueueFailed()
-    onFailed(job: Job, err: Error) {
-        this.logger.warn(`Job ${job.id} (Inference ID: ${job.data.inferenceId}) failed after ${job.attemptsMade} attempts: ${err.message}`, err.stack);
-        // 실패 알림 등 추가 로직 구현 가능
-    }
-    */
-
-    /*
+    onFailed(job: Job, err: Error) { ... }
     @OnQueueCompleted()
-    onCompleted(job: Job, result: any) {
-        this.logger.log(`Job ${job.id} (Inference ID: ${job.data.inferenceId}) completed successfully with result: ${JSON.stringify(result)}`);
-        // 완료 후처리 로직 구현 가능 (예: 사용자 알림)
-    }
+    onCompleted(job: Job, result: any) { ... }
     */
-
-    // Optional: Add listeners for queue events (e.g., completed, failed)
-    // @OnQueueActive()
-    // onActive(job: Job) { ... }
 }

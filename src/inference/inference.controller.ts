@@ -32,7 +32,7 @@ export class InferenceController {
      * @param req Request 객체 (사용자 정보 포함 가정)
      * @returns 생성된 작업 정보 (DB ID, 큐 ID, 상태 조회 URL)
      */
-    @Post()
+    @Post('sts')
     @HttpCode(HttpStatus.ACCEPTED) // 비동기 작업이므로 202 Accepted 사용
     @ApiOperation({ summary: 'AI 음성 변환 요청', description: '추론 큐에 작업을 제출합니다.' })
     @ApiBody({ type: InferenceRequestDto })
@@ -42,10 +42,10 @@ export class InferenceController {
     async requestTransformation(
         @Body() dto: InferenceRequestDto,
     ) {
-        this.logger.log(`/api/v1/inference 요청 수신: ${JSON.stringify(dto)}`);
+        this.logger.log(`/api/v1/inference/sts 요청 수신: ${JSON.stringify(dto)}`);
         const userId = dto.userId || 1;
         const result = await this.inferenceService.requestTransformation({ ...dto, userId });
-        this.logger.log(`/api/v1/inference 작업 제출됨: ${JSON.stringify(result)}`);
+        this.logger.log(`/api/v1/inference/sts 작업 제출됨: ${JSON.stringify(result)}`);
         return { data: result, message: 'Inference 작업이 수락되어 큐에 등록되었습니다.' };
     }
 

@@ -8,10 +8,10 @@ import { FileSystemException, DatabaseException } from './exceptions/upload-exce
 
 /**
  * 파일 업로드 및 삭제 관련 API 엔드포인트를 처리하는 컨트롤러
- * 경로 접두사: /api/v1/upload
+ * 경로 접두사: /api/v1/common/upload (전역 접두사 /api/v1 적용)
  */
 @ApiTags('Upload')
-@Controller('api/v1/upload')
+@Controller('common/upload')
 export class UploadController {
     private readonly logger = new Logger(UploadController.name);
 

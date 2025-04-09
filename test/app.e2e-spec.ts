@@ -112,7 +112,7 @@ describe('AppController (e2e)', () => {
         let statusCheckUrl: string;
 
         const uploadResponse = await request(app.getHttpServer())
-            .post('/api/v1/upload/audio')
+            .post('/api/v1/common/upload/audio')
             .attach('file', testFilePath)
             .field('userId', testUserId)
             .field('fileName', 'test.wav')
@@ -151,7 +151,7 @@ describe('AppController (e2e)', () => {
 
         // 4. Delete Uploaded File
         const deleteResponse = await request(app.getHttpServer())
-            .delete(`/api/v1/upload/audio/${fileId}`)
+            .delete(`/api/v1/common/upload/audio/${fileId}`)
             .send({ userId: testUserId }); // Send userId in body as per controller
 
         expect(deleteResponse.status).toBe(HttpStatus.OK);
@@ -159,7 +159,7 @@ describe('AppController (e2e)', () => {
 
         // 5. Verify deletion (optional: check DB or try fetching upload again)
         const getDeletedUpload = await request(app.getHttpServer())
-            .get(`/api/v1/upload/audio/${fileId}`) // Assuming a GET endpoint exists (it doesn't)
+            .get(`/api/v1/common/upload/audio/${fileId}`) // Assuming a GET endpoint exists (it doesn't)
             // A better check might be querying the repository directly if accessible
             // Or checking the inference job (SET NULL FK)
 
@@ -168,9 +168,9 @@ describe('AppController (e2e)', () => {
 
     }, 35000); // Increase test timeout for polling
 
-    it('POST /upload/audio - should fail with 400 if required fields are missing', () => {
+    it('POST /common/upload/audio - should fail with 400 if required fields are missing', () => {
         return request(app.getHttpServer())
-            .post('/api/v1/upload/audio')
+            .post('/api/v1/common/upload/audio')
             .attach('file', testFilePath) // Attach file
             // Missing userId, fileName, fileSize, type
             .expect(HttpStatus.BAD_REQUEST);
@@ -190,9 +190,9 @@ describe('AppController (e2e)', () => {
             .expect(HttpStatus.NOT_FOUND);
     });
 
-    it('DELETE /upload/audio/:id - should fail with 404 if fileId does not exist', () => {
+    it('DELETE /common/upload/audio/:id - should fail with 404 if fileId does not exist', () => {
         return request(app.getHttpServer())
-            .delete('/api/v1/upload/audio/77777')
+            .delete('/api/v1/common/upload/audio/77777')
             .send({ userId: testUserId })
             .expect(HttpStatus.NOT_FOUND);
     });

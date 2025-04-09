@@ -30,6 +30,7 @@ async function bootstrap() {
     bufferLogs: true,
   });
 
+  // 전역 접두사 설정
   app.setGlobalPrefix('api/v1');
 
   app.enableShutdownHooks();
