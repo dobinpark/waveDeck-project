@@ -45,16 +45,58 @@ graph LR
     style Redis fill:#fcc,stroke:#333,stroke-width:2px
 ```
 
-_(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에서 렌더링됩니다.)_
 
-### 주요 모듈 요약
+### 아키텍처 개요
 
--   **`UploadModule`**: 파일 업로드/삭제 API 처리, 파일 시스템 저장, DB 메타데이터 관리.
--   **`InferenceModule`**: AI 변환 요청/상태 조회 API 처리, 큐 작업 등록, DB 상태 관리.
--   **`BullMQModule` & `InferenceProcessor`**: Redis 기반 큐 설정 및 비동기 작업 처리 워커.
--   **`CommonModule`**: 전역 예외 필터, 응답 인터셉터, 요청 ID 미들웨어 등 공통 기능 제공.
--   **`ConfigModule`**: `.env` 환경 변수 관리.
--   **`TypeOrmModule`**: MySQL DB 연결 및 엔티티 관리.
+이 애플리케이션은 NestJS 프레임워크를 기반으로 구축된 모듈식 백엔드 서버입니다. Docker Compose를 사용하여 애플리케이션 컨테이너(NestJS), 데이터베이스 컨테이너(MySQL), 큐 브로커 컨테이너(Redis)를 함께 실행하는 구조입니다.
+
+클라이언트(웹 브라우저, 모바일 앱, API 테스트 도구 등)는 HTTP 요청을 통해 NestJS 애플리케이션의 API 엔드포인트와 통신합니다. 파일 업로드 및 AI 변환 요청과 같은 주요 기능은 별도의 모듈로 분리되어 관리됩니다. AI 변환과 같이 시간이 오래 걸릴 수 있는 작업은 BullMQ와 Redis를 이용한 비동기 큐 시스템을 통해 처리됩니다. 데이터 영속성은 TypeORM을 통해 MySQL 데이터베이스에서 관리하며, 파일 자체는 서버의 로컬 파일 시스템(Docker 볼륨으로 관리 가능)에 저장됩니다.
+
+### 주요 모듈 및 상호작용
+
+1.  **`UploadModule`**:
+    *   **역할:** 파일 업로드(`POST /api/v1/common/upload/audio`) 및 삭제(`DELETE /api/v1/common/upload/audio/:id`) API 요청 처리.
+    *   **상호작용:**
+        *   `UploadController`: 클라이언트 요청 수신, 요청 데이터 검증(파일 크기/타입 등), `UploadService` 호출.
+        *   `UploadService`: 실제 파일 유효성 검사, 파일 시스템 저장 로직 수행 (로컬 `waveDeck-uploads` 디렉토리), TypeORM을 통해 `uploads` 테이블에 파일 메타데이터 저장/삭제.
+
+2.  **`InferenceModule`**:
+    *   **역할:** AI 변환 요청(`POST /api/v1/inference/sts`) 및 작업 상태 조회(`GET /api/v1/inference/status/:jobId`) API 요청 처리.
+    *   **상호작용:**
+        *   `InferenceController`: 클라이언트 요청 수신, 요청 데이터 검증, `InferenceService` 호출.
+        *   `InferenceService`:
+            *   (변환 요청 시) TypeORM을 통해 `inferences` 테이블에 작업 레코드 생성(초기 상태: PENDING).
+            *   BullMQ(`inference-queue`)에 AI 처리 작업(작업 데이터: `inferenceId`) 추가.
+            *   TypeORM을 통해 `inferences` 테이블 상태를 QUEUED로 업데이트하고 BullMQ Job ID 저장.
+            *   (상태 조회 시) TypeORM에서 해당 `inference` 레코드 조회.
+            *   BullMQ에서 실제 큐 작업 상태(`getState()`) 및 대기열 정보(`getWaitingCount()`) 조회.
+            *   DB 상태와 큐 상태를 종합하여 최종 응답 DTO 생성 및 반환 (필요시 DB 상태 업데이트).
+        *   `InferenceProcessor` (BullMQ 워커):
+            *   `inference-queue`에서 작업을 가져와 비동기 처리 (현재는 Mock AI 처리 시뮬레이션).
+            *   처리 시작 시 TypeORM 통해 `inferences` 상태를 PROCESSING으로 업데이트.
+            *   처리 완료/실패 시 TypeORM 통해 `inferences` 상태를 COMPLETED 또는 FAILED로 업데이트하고 결과(변환 경로, 에러 메시지 등) 저장.
+
+3.  **`BullMQModule`**:
+    *   **역할:** Redis를 사용하여 메시지 큐 (`inference-queue`) 설정 및 관리. `InferenceModule`에서 import하여 사용.
+
+4.  **`TypeOrmModule`**:
+    *   **역할:** MySQL 데이터베이스 연결 관리, 엔티티(`Upload`, `Inference`) 정의 및 Repository 제공. 각 모듈의 서비스(`UploadService`, `InferenceService`, `InferenceProcessor`)에서 DB 작업을 위해 사용.
+
+5.  **`ConfigModule`**:
+    *   **역할:** `.env` 파일의 환경 변수(DB 접속 정보, Redis 정보, BASE_URL 등)를 로드하고 애플리케이션 전체에서 사용할 수 있도록 제공.
+
+6.  **`CommonModule`**:
+    *   **역할:** 여러 모듈에서 공통으로 사용되는 기능 제공.
+        *   `HttpExceptionFilter`: 전역 예외 처리.
+        *   `ResponseInterceptor`: 표준 응답 형식 래핑.
+        *   `RequestIdMiddleware`: 모든 요청에 고유 ID 부여 및 로깅 컨텍스트 설정.
+
+**주요 흐름 예시:**
+
+*   **파일 업로드:** Client -> `UploadController` -> `UploadService` -> (File System 저장 & TypeORM 통해 DB 저장) -> `UploadController` -> Client
+*   **AI 변환 요청:** Client -> `InferenceController` -> `InferenceService` -> (TypeORM 통해 DB 저장 & BullMQ 통해 큐에 작업 추가) -> `InferenceController` -> Client
+*   **AI 변환 처리 (비동기):** BullMQ Queue -> `InferenceProcessor` -> (TypeORM 통해 DB 상태 업데이트 & 결과 저장)
+*   **상태 조회:** Client -> `InferenceController` -> `InferenceService` -> (TypeORM 통해 DB 조회 & BullMQ 통해 큐 상태 조회) -> `InferenceController` -> Client
 
 ## 3. 기술 스택 (Tech Stack)
 
@@ -123,55 +165,131 @@ _(위 다이어그램은 Mermaid 문법으로 작성되었으며, GitHub 등에�
 
 API 테스트는 아래 제공된 `curl` 예시를 사용하거나 Postman과 같은 API 클라이언트 도구를 활용하여 수행할 수 있습니다. 모든 요청의 Base URL은 `http://localhost:3000/api/v1` 입니다. (Docker 실행 기준)
 
-**(Postman 사용 시) Postman Collection:** [Postman 컬렉션 링크 또는 파일 경로 삽입 - 선택 사항]
-
 ### 5.1. 파일 업로드 (`POST /common/upload/audio`)
 
-오디오 파일과 사용자 ID, 파일명, 크기 등의 메타데이터를 `form-data`로 전송합니다.
+오디오 파일과 관련 메타데이터를 `multipart/form-data` 형식으로 전송하여 업로드합니다.
 
+-   **Payload (`form-data`)**: 
+    -   `file`: (필수) 업로드할 오디오 파일 (`.wav`, `.mp3` 등)
+    -   `userId`: (필수) 업로드하는 사용자 ID (텍스트)
+    -   `fileName`: (필수) 저장될 파일 이름 (텍스트)
+    -   `fileSize`: (필수) 파일 크기 (Bytes, 텍스트)
+    -   `duration`: (선택) 오디오 길이 (Milliseconds, 텍스트)
 -   **`curl` 예시**:
     ```bash
     curl --location --request POST 'http://localhost:3000/api/v1/common/upload/audio' \
     --form 'file=@"/path/to/your/audio.wav"' \
     --form 'userId="1"' \
     --form 'fileName="audio.wav"' \
-    --form 'fileSize="102400"'
+    --form 'fileSize="102400"' \
+    --form 'duration="30000"' # 선택 사항
     ```
--   **성공 시**: 201 응답과 함께 `fileId`, `filePreviewUrl`, `uploadTime` 반환.
+-   **성공 응답 (201 Created)**:
+    ```json
+    {
+        "statusCode": 201,
+        "message": "success",
+        "data": {
+            "fileId": 1, // 생성된 파일 ID
+            "filePreviewUrl": "http://localhost:3000/waveDeck-uploads/audio/1/1.wav", // 미리보기 URL
+            "uploadTime": "2024-08-01T12:00:00.000Z" // 업로드 시간
+        }
+    }
+    ```
 
 ### 5.2. AI 변환 요청 (`POST /inference/sts`)
 
-`userId`, `fileId`, `voiceId`, `pitch`를 JSON 바디로 전송합니다.
+업로드된 파일 ID와 변환 옵션을 JSON 형식으로 전송하여 AI 변환 작업을 요청합니다.
 
+-   **Payload (`raw`, JSON)**:
+    ```json
+    {
+      "userId": 1,         // (필수) 요청 사용자 ID
+      "fileId": 1,         // (필수) 변환할 원본 파일 ID (업로드 응답의 fileId)
+      "voiceId": 72,        // (필수) 사용할 목소리 ID
+      "pitch": 0          // (선택) 음 높낮이 조절 (기본값 0)
+    }
+    ```
 -   **`curl` 예시**:
     ```bash
     curl --location --request POST 'http://localhost:3000/api/v1/inference/sts' \
     --header 'Content-Type: application/json' \
     --data-raw '{ "userId": 1, "fileId": 1, "voiceId": 72, "pitch": 0 }'
     ```
--   **성공 시**: 201 또는 202 응답과 함께 `jobId` (DB ID), `jobQueueId` (큐 ID), `statusCheckUrl` 반환.
+-   **성공 응답 (201 Created / 202 Accepted)**:
+    ```json
+    {
+        "statusCode": 201, // 또는 202
+        "message": "success", // 또는 "Inference 작업이 수락되어 큐에 등록되었습니다."
+        "data": {
+            "jobId": 1, // 생성된 DB 작업 ID (Inference ID)
+            "jobQueueId": "inference-1", // 생성된 큐 작업 ID
+            "statusCheckUrl": "/api/v1/inference/status/1" // 상태 조회 API 경로
+        }
+    }
+    ```
 
 ### 5.3. 작업 상태 조회 (`GET /inference/status/:jobId`)
 
-경로 파라미터로 DB `jobId`를 사용합니다.
+경로 파라미터로 AI 변환 요청 시 받은 DB 작업 ID (`jobId`)를 사용하여 작업 상태를 조회합니다.
 
+-   **Payload**: 없음 (경로 파라미터 사용)
 -   **`curl` 예시**:
     ```bash
     curl --location --request GET 'http://localhost:3000/api/v1/inference/status/1'
     ```
--   **성공 시**: 200 응답과 함께 상세 작업 상태 (`JobStatusResponseDto` 형식) 반환 (DB 상태, 큐 상태, 결과 등 포함).
+-   **성공 응답 (200 OK)**: (`JobStatusResponseDto` 형식)
+    ```json
+    // 예시: 완료 상태
+    {
+        "statusCode": 200,
+        "message": "success",
+        "data": {
+            "jobQueueId": "inference-1",
+            "inferenceDbId": 1,
+            "status": "completed", // "queued", "processing", "completed", "failed"
+            "queueState": "completed", // BullMQ 큐 상태
+            "waitingCount": null,
+            "result": {
+                "inferenceId": 1,
+                "previewUrl": "http://localhost:3000/waveDeck-converted/audio/1/converted_1.wav",
+                "convertedPath": "waveDeck-converted/audio/1/converted_1.wav",
+                "convertedFileSize": 345678
+            },
+            "createdAt": "2024-08-01T12:05:00.000Z",
+            "updatedAt": "2024-08-01T12:05:10.000Z",
+            "errorMessage": null,
+            "processingStartedAt": "2024-08-01T12:05:05.000Z",
+            "processingFinishedAt": "2024-08-01T12:05:10.000Z"
+        }
+    }
+    ```
+    *참고: `status`, `queueState`, `result`, `errorMessage` 등은 작업 진행 상태에 따라 달라집니다.*
 
 ### 5.4. 파일 삭제 (`DELETE /common/upload/audio/:id`)
 
-경로 파라미터로 `fileId`를 사용하고, `userId`를 JSON 바디로 전송합니다.
+경로 파라미터로 삭제할 파일의 ID (`id`)를 사용하고, 요청 본문에 사용자 ID를 JSON 형식으로 전송합니다.
 
+-   **Payload (`raw`, JSON)**:
+    ```json
+    { 
+      "userId": 1 // (필수) 파일 소유자 확인을 위한 사용자 ID
+    }
+    ```
 -   **`curl` 예시**:
     ```bash
     curl --location --request DELETE 'http://localhost:3000/api/v1/common/upload/audio/1' \
     --header 'Content-Type: application/json' \
     --data-raw '{ "userId": 1 }'
     ```
--   **성공 시**: 200 응답과 함께 삭제 성공 메시지 반환.
+-   **성공 응답 (200 OK)**:
+    ```json
+    {
+        "statusCode": 200,
+        "message": "success", // 또는 "파일이 성공적으로 삭제되었습니다."
+        "data": null
+    }
+    ```
 
 ## 6. 데이터베이스 (Database)
 
@@ -252,9 +370,3 @@ API 테스트는 아래 제공된 `curl` 예시를 사용하거나 Postman과 �
 -   **도구**: GitHub Actions (`.github/workflows/ci.yml`)
 -   **트리거**: `main` 브랜치 `push` 또는 `pull_request`
 -   **작업**: 의존성 설치, 린트, 빌드, 단위/통합 테스트, E2E 테스트 자동 수행.
-
-## 9. 주요 의사결정 및 구현 세부 내용 (Decisions & Details)
-
-**(이 섹션에 프로젝트 진행 중 내렸던 주요 기술적 결정, 특정 구현 방식의 이유 등을 자유롭게 기술하세요.)**
-
--   예: BullMQ를 선택한 이유, 에러 처리 전략, 폴더 구조 설계 이유, Docker 멀티 스테이지 빌드 사용 이유 등
